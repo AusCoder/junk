@@ -1,3 +1,11 @@
 main
+nmsCpu
+nmsGpu
+generateBoxes
+loadNumpy
+
 *.o
 *.obj
+*.so
+
+env

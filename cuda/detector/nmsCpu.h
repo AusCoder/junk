@@ -1,8 +1,8 @@
 #include <algorithm>
 #include <numeric>
-#include <vector>
-#include <string>
 #include <sstream>
+#include <string>
+#include <vector>
 
 using namespace std;
 
@@ -13,23 +13,23 @@ struct BBox {
   float yMax;
 
   BBox() = default;
-  BBox(float xm, float ym, float xM, float yM): xMin{xm}, yMin{ym}, xMax{xM}, yMax{yM} {}
+  BBox(float xm, float ym, float xM, float yM)
+      : xMin{xm}, yMin{ym}, xMax{xM}, yMax{yM} {}
 
   string toString() {
     stringstream ss;
-    ss << "BBox(" << xMin << ", " << yMin << ",  "
-                  << xMax << ", " << yMax << ")";
+    ss << "BBox(" << xMin << ", " << yMin << ",  " << xMax << ", " << yMax
+       << ")";
     return ss.str();
   }
 };
 
-template<typename T>
-vector<int> sortIndices(T *values, size_t size) {
+template <typename T> vector<int> sortIndices(T *values, size_t size) {
   vector<int> indices(size);
   iota(indices.begin(), indices.end(), 0);
 
   sort(indices.begin(), indices.end(),
-    [&values](int i1, int i2) { return values[i1] < values[i2]; });
+       [&values](int i1, int i2) { return values[i1] < values[i2]; });
 
   return indices;
 }
@@ -50,7 +50,8 @@ float iou(const BBox &box1, const BBox &box2) {
   return intersection / (area1 + area2 - intersection);
 }
 
-void nmsCpu(BBox *boxes, float *scores, size_t boxesSize, BBox *outBoxes, size_t outBoxesSize, float iouThreshold) {
+void nmsCpu(BBox *boxes, float *scores, size_t boxesSize, BBox *outBoxes,
+            size_t outBoxesSize, float iouThreshold) {
   vector<int> indices = sortIndices(scores, boxesSize);
   reverse(indices.begin(), indices.end());
   vector<int> keptBoxes(boxesSize);
@@ -63,7 +64,7 @@ void nmsCpu(BBox *boxes, float *scores, size_t boxesSize, BBox *outBoxes, size_t
 
     outBoxes[outBoxIdx] = curBox;
 
-    for(size_t i = outBoxIdx + 1; i < boxesSize; i++) {
+    for (size_t i = outBoxIdx + 1; i < boxesSize; i++) {
       if (iou(curBox, boxes[indices[i]]) > iouThreshold) {
         keptBoxes[i] = 0;
       }
