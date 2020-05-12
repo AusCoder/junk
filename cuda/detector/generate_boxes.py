@@ -1,4 +1,4 @@
-"""Sample program doing mtcnn box generation
+"""Sample program doing just mtcnn box generation
 """
 
 import numpy as np
@@ -26,9 +26,17 @@ def generate_bounding_box(prob, reg, threshold, scale):
 
 
 if __name__ == "__main__":
-    prob = np.array([[[0.1, 0.9], [0.8, 0.2]], [[0.7, 0.3], [0.3, 0.7]],])
-    reg = np.ones((2, 2, 2))
-    threshold = 0.5
-    scale = 1.0
+    # prob = np.array([[[0.1, 0.9], [0.8, 0.2]], [[0.7, 0.3], [0.3, 0.7]],])
+    # reg = np.ones((2, 2, 2))
+    # threshold = 0.5
+    # scale = 1.0
+
+    array_path = "/home/seb/code/ii/ml-source/mtcnn-output-arrays/stage-one/prob-0.npy"
+    (prob,) = np.load(array_path)
+    reg = np.ones_like(prob)
+    threshold = 0.95
+    scale = 0.709
+
     _, _, bbox = generate_bounding_box(prob, reg, threshold, scale)
-    print(bbox)
+    print(f"bbox shape: {bbox.shape}")
+    # print(bbox)

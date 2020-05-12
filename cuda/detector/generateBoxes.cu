@@ -7,6 +7,8 @@ Program to attempt mtcnn box generation in cuda.
 #include <string>
 #include <vector>
 
+#include <cuda_runtime.h>
+
 #include "cnpy.h"
 #include "common.h"
 
@@ -19,8 +21,13 @@ using namespace std;
   I can think of us splitting the prob grid up a lot then looping in
   each block.
 
-  We can also do the unrolled loop template trick, that I see other
-  nms code doing.
+  The issue with doing it this way is that we can't hit that much of the
+  prob array. Here if we run this kernel with a block size of {256, 1, 1}
+  then we will hit just the first 256 prob entries, it might be much bigger
+  than this. To get around this, I have seen other nms code create 2 nested
+  loops. With the outer one striding over a small number of elements.
+
+  See nmsLayer.cu in the TensorRT kernels.
 */
 __global__ void generateBoxesKernelSimple(Prob *prob, int probWidth,
                                           int probHeight, int *outIndices,
@@ -54,6 +61,59 @@ __global__ void generateBoxesKernelSimple(Prob *prob, int probWidth,
   }
 }
 
+// DIM is going to be the blockSize, ie blockDim.x
+// I have seen it templated for loop unrolling?
+template <int TSIZE, int DIM>
+__global__ void generateBoxesKernel(Prob *prob, int probWidth, int probHeight,
+                                    int *outIndices, int maxOutIndices) {
+  // This is for a single element, ie a batch size of 1
+  // I have seen nms code that uses one block per batch item
+  // See nmsLayer.cu from TensorRT kernels
+
+  Prob thisThreadProbs[TSIZE];
+
+  __shared__ int outIdx;
+  if (threadIdx.z == 0 && threadIdx.y == 0 && threadIdx.x == 0) {
+    outIdx = 0;
+  }
+
+  int probSize = probWidth * probHeight;
+
+  for (int i = 0; i < TSIZE; i++) {
+    if (i * DIM + threadIdx.x < probSize) {
+      thisThreadProbs[i] = prob[i * DIM + threadIdx.x];
+    }
+  }
+
+  for (int i = 0; i < TSIZE; i++) {
+
+    for (int j = 0; j < DIM; j++) {
+      int offset = i * DIM;
+      int index = offset + j;
+      if (index >= probSize) {
+        break;
+      }
+
+      __syncthreads();
+
+      if (threadIdx.x == j) {
+        Prob p = thisThreadProbs[i];
+        if (p.y > 0.95) {
+          outIndices[outIdx] = index;
+          printf("Gpu. index: %d. outIdx: %d\n", index, outIdx);
+          outIdx++;
+        }
+      }
+
+      __syncthreads();
+
+      if (outIdx == maxOutIndices) {
+        return;
+      }
+    }
+  }
+}
+
 vector<int> getIndicesAboveThreshold(const vector<Prob> &prob, int width,
                                      int height, int maxOutIndices) {
   vector<int> outIndices(maxOutIndices);
@@ -67,9 +127,11 @@ vector<int> getIndicesAboveThreshold(const vector<Prob> &prob, int width,
                        sizeof(Prob) * prob.size(), cudaMemcpyHostToDevice));
 
   int grid = 1;
-  dim3 block{256, 1, 1};
-  generateBoxesKernelSimple<<<grid, block>>>(dProb, width, height, dOutIndices,
-                                             outIndices.size());
+  const int block = 1024;
+  const int tsize = 60;
+
+  generateBoxesKernel<tsize, block>
+      <<<grid, block>>>(dProb, width, height, dOutIndices, outIndices.size());
 
   CUDACHECK(cudaMemcpy((void *)outIndices.data(), (void *)dOutIndices,
                        sizeof(int) * outIndices.size(),
@@ -88,7 +150,7 @@ int main(int argc, char **argv) {
   // int maxOutIndices = 3;
 
   vector<Prob> prob;
-  int maxOutIndices = 10;
+  int maxOutIndices = 500;
 
   char arrayFilename[] =
       "/home/seb/code/ii/ml-source/mtcnn-output-arrays/stage-one/prob-0.npy";
