@@ -4,6 +4,8 @@ nmsGpu
 generateBoxes
 loadNumpy
 
+imShow
+
 *.o
 *.obj
 *.so
