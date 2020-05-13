@@ -5,6 +5,7 @@ generateBoxes
 loadNumpy
 
 imShow
+showPixels
 
 *.o
 *.obj
