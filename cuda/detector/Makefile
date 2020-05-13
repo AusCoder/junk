@@ -17,6 +17,9 @@ nmsGpu: nmsGpu.obj
 generateBoxes: generateBoxes.obj
 	$(CXX) $(LDFLAGS) $(LDLIBS) $^ -o $@
 
+cropResize: cropResize.obj
+	$(CXX) $(LDFLAGS) $(LDLIBS) $^ -o $@
+
 loadNumpy: loadNumpy.o
 	$(CXX) $(LDFLAGS) -lcnpy $^ -o $@
 
@@ -27,4 +30,4 @@ loadNumpy: loadNumpy.o
 	$(NVCC) $(NVFLAGS) $(CPPFLAGS) -c $< -o $@
 
 clean:
-	$(RM) *.o *.obj main nmsGpu nmsCpu loadNumpy generateBoxes
+	$(RM) *.o *.obj main nmsGpu nmsCpu generateBoxes cropResize loadNumpy
