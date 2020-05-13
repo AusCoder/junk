@@ -88,6 +88,7 @@ __global__ void generateBoxesKernel(Prob *prob, int probWidth, int probHeight,
   for (int i = 0; i < TSIZE; i++) {
 
     for (int j = 0; j < DIM; j++) {
+
       int offset = i * DIM;
       int index = offset + j;
       if (index >= probSize) {
