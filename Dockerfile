@@ -47,3 +47,7 @@ RUN \
 #     ..
 
 # RUN make -j 8 && make install
+
+# ENV CUDA_INSTALL_DIR=
+# ENV OPENCV_INCLUDE_DIR=/opt/opencv/install/inclide
+# ENV LD_LIBRARY_PATH=/opt/opencv/install/lib:$LD_LIBRARY_PATH

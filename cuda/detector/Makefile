@@ -1,8 +1,8 @@
 # CUDA_INSTALL_DIR = /home/seb/cuda-10.1/cuda-toolkit
-OPENCV_INCLUDE_DIR = /usr/include/opencv4
+# OPENCV_INCLUDE_DIR = /usr/include/opencv4
 
-CC = gcc-8
-CXX = g++-8
+# CC = gcc-8
+# CXX = g++-8
 CXXFLAGS = -g -Wall -std=c++17
 CPPFLAGS = -I$(CUDA_INSTALL_DIR)/include -I$(OPENCV_INCLUDE_DIR) -I./include
 LDFLAGS = -L$(CUDA_INSTALL_DIR)/lib64 -L./lib
