@@ -1,16 +1,20 @@
 # CUDA_INSTALL_DIR = /home/seb/cuda-10.1/cuda-toolkit
-# OPENCV_INCLUDE_DIR = /usr/include/opencv4
+OPENCV_INCLUDE_DIR = /usr/include/opencv4
 
 # CC = gcc-8
 # CXX = g++-8
 CXXFLAGS = -g -Wall -std=c++17
 CPPFLAGS = -I$(CUDA_INSTALL_DIR)/include -I$(OPENCV_INCLUDE_DIR) -I./include
 LDFLAGS = -L$(CUDA_INSTALL_DIR)/lib64 -L./lib
-LDLIBS = -lcudart -lcnpy -lopencv_core -lopencv_imgcodecs
+# LDLIBS = -lcudart -lcnpy -lopencv_core -lopencv_imgcodecs
+LDLIBS = -lopencv_core -lopencv_imgcodecs
 NVCC = $(CUDA_INSTALL_DIR)/bin/nvcc
 NVFLAGS = -g -Xcompiler -Wall
 
-nmsCpu: main.o
+mainMtcnn: mainMtcnn.o mtcnn.o
+	$(CXX) $(LDFLAGS) $(LDLIBS) $^ -o $@
+
+nmsCpu: nmsCpu.o
 	$(CXX) $(LDFLAGS) $(LDLIBS) $^ -o $@
 
 nmsGpu: nmsGpu.obj
@@ -32,4 +36,4 @@ loadNumpy: loadNumpy.o
 	$(NVCC) $(NVFLAGS) $(CPPFLAGS) -c $< -o $@
 
 clean:
-	$(RM) *.o *.obj main nmsGpu nmsCpu generateBoxes cropResize loadNumpy
+	$(RM) *.o *.obj main nmsGpu nmsCpu generateBoxes cropResize loadNumpy mainMtcnn

@@ -3,6 +3,7 @@ nmsCpu
 nmsGpu
 generateBoxes
 loadNumpy
+mainMtcnn
 
 imShow
 showPixels
