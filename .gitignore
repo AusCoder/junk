@@ -4,6 +4,8 @@ nmsGpu
 generateBoxes
 loadNumpy
 
+cuda/detector/docker/tmp/
+
 imShow
 showPixels
 
