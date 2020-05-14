@@ -7,6 +7,8 @@ loadNumpy
 imShow
 showPixels
 
+writeWebcam
+
 *.o
 *.obj
 *.so
