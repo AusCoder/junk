@@ -5,6 +5,8 @@ Kernel to crop and resize boxes from an image
 #include <vector>
 
 #include <cuda_runtime.h>
+#include <opencv2/core.hpp>
+#include <opencv2/imgcodecs.hpp>
 
 #include "common.h"
 
@@ -90,14 +92,14 @@ __global__ void cropResizeKernel(
               rightXIndex]));
     const float top = topLeft + (topRight - topLeft) * xLerp;
     const float bottom = bottomLeft + (bottomRight - bottomLeft) * xLerp;
-    croppedBoxes[out_idx] = top + (bottom - top) * yLerp;
+    croppedBoxes[outIdx] = top + (bottom - top) * yLerp;
   }
 }
 
-vector<float> runCropResize(
-  const vector<float> &image, int imageWidth, int imageHeight, int depth,
-  const vecotr<float> &boxes, int boxesSize, int cropWidth, int cropHeight
-) {
+vector<float> runCropResize(const vector<float> &image, int imageWidth,
+                            int imageHeight, int depth,
+                            const vector<float> &boxes, int boxesSize,
+                            int cropWidth, int cropHeight) {
   int croppedBoxesSize = boxesSize * cropWidth * cropHeight * depth;
   vector<float> croppedBoxes(croppedBoxesSize);
 
@@ -107,22 +109,22 @@ vector<float> runCropResize(
 
   CUDACHECK(cudaMalloc((void **)&dImage, sizeof(float) * image.size()));
   CUDACHECK(cudaMalloc((void **)&dBoxes, sizeof(float) * boxes.size()));
-  CUDACHECK(cudaMalloc((void **)&dCroppedBoxes, sizeof(float) * croppedBoxes.size()));
+  CUDACHECK(
+      cudaMalloc((void **)&dCroppedBoxes, sizeof(float) * croppedBoxes.size()));
 
-  CUDACHECK(cudaMemcpy((void *)dImage, (void *)image.data()),
-            sizeof(float) * image.size(), cudaMemcpyHostToDevice);
+  CUDACHECK(cudaMemcpy((void *)dImage, (void *)image.data(),
+                       sizeof(float) * image.size(), cudaMemcpyHostToDevice));
 
-  const int blockSize = 1024;
-  const int gridSize = (croppedBoxesSize + blockSize - 1) / blockSize;
+  const int block = 1024;
+  const int grid = (croppedBoxesSize + block - 1) / block;
 
-  cropResizeKernel<<<grid, block>>>(
-    dImage, imageWidth, imageHeight, depth,
-    dBoxes, boxesSize, cropWidth, cropHeight,
-    dCroppedBoxes, croppedBoxesSize
-  );
+  cropResizeKernel<<<grid, block>>>(dImage, imageWidth, imageHeight, depth,
+                                    dBoxes, boxesSize, cropWidth, cropHeight,
+                                    dCroppedBoxes, croppedBoxesSize);
 
   CUDACHECK(cudaMemcpy((void *)croppedBoxes.data(), (void *)dCroppedBoxes,
-    sizeof(float) * croppedBoxes.size(), cudaMemcpyDeviceToHost));
+                       sizeof(float) * croppedBoxes.size(),
+                       cudaMemcpyDeviceToHost));
 
   CUDACHECK(cudaFree((void *)dImage));
   CUDACHECK(cudaFree((void *)dBoxes));
@@ -131,29 +133,33 @@ vector<float> runCropResize(
   return croppedBoxes;
 }
 
-
 int main(int argc, char **argv) {
-  int imageWidth = 2;
-  int imageHeight = 2;
-  int depth = 3;
-  vector<float> image {
-    1.0, 1.0, 1.0,
-    2.0, 2.0, 2.0,
-    3.0, 3.0, 3.0,
-    4.0, 4.0, 4.0
-  };
+  // int imageWidth = 2;
+  // int imageHeight = 2;
+  // int depth = 3;
+  // vector<float> image{1.0, 1.0, 1.0, 2.0, 2.0, 2.0,
+  //                     3.0, 3.0, 3.0, 4.0, 4.0, 4.0};
 
-  vector<float> boxes = { 0.3, 0.3, 0.7, 0.7};
-  int boxesSize = 1;
-  int cropHeight = 50;
-  int cropWidth = 50;
+  std::string imagePath =
+      "/home/seb/code/ii/ml-source/data/sample_images/execs.jpg";
+  cv::Mat image = cv::imread(imagePath, cv::IMREAD_COLOR);
+  // image.convertTo(image, cv::CV_32FC3);
 
-  auto croppedBoxes = runCropResize(
-    image, imageWidth, imageHeight, depth,
-    boxes, boxesSize, cropHeight, cropWidth
-  );
+  cv::Vec3f point = image.at<cv::Vec3f>(0, 0);
+  cout << point[0] << endl;
 
-  cout << croppedBoxesSize.size() << endl;
+  // vector<float> boxes = {0.3, 0.3, 0.7, 0.7};
+  // int boxesSize = 1;
+  // int cropHeight = 9;
+  // int cropWidth = 9;
+
+  // auto croppedBoxes = runCropResize(image, imageWidth, imageHeight, depth,
+  //                                   boxes, boxesSize, cropHeight, cropWidth);
+
+  // for (auto &val : croppedBoxes) {
+  //   cout << val << ", ";
+  // }
+  // cout << endl;
 
   return 0;
 }

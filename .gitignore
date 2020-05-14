@@ -12,3 +12,4 @@ showPixels
 *.so
 
 env
+.vscode
