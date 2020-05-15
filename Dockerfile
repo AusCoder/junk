@@ -71,3 +71,4 @@ ENV OPENCV_LIB_DIR=/opt/opencv/install/lib
 ENV OPENCV_INCLUDE_DIR=/opt/opencv/install/include/opencv4
 ENV PKG_CONFIG_PATH=/opt/opencv/install/lib/pkgconfig:$PKG_CONFIG_PATH
 ENV CUDA_INSTALL_DIR=/usr/local/cuda
+ENV TRT_INCLUDE_DIR=/usr/include/x86_64-linux-gnu

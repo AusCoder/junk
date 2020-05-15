@@ -5,6 +5,8 @@ generateBoxes
 loadNumpy
 mainMtcnn
 
+loggerSample
+
 imShow
 showPixels
 resizeImage
