@@ -27,6 +27,7 @@ void Mtcnn::stageOne(cv::Mat image) {
     int widthScaled = imageWidth * scale;
     int heightScaled = imageHeight * scale;
     // std::cout << heightScaled << ", " << widthScaled << std::endl;
+
     cv::Size scaledSize{widthScaled, heightScaled};
     cv::cuda::resize(gpuImage, scaledGpuImage, scaledSize, 0, 0,
                      cv::INTER_LINEAR);
