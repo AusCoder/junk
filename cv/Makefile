@@ -1,18 +1,18 @@
-# CC = gcc-8
-# CXX = g++-8
 CXXFLAGS = -g -Wall -std=c++17
-CPPFLAGS = -I/usr/include/opencv4 -I./include
+CPPFLAGS = $(shell pkg-config --cflags opencv4)
 LDFLAGS =
-LDLIBS = -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc
+LDLIBS = $(shell pkg-config --libs opencv4)
 
+# Note to self: The order of arguments matters in the linking!
+# This was once the cause of great confusion, may it never happen again!
 imShow: imShow.o
-	$(CXX) $(LDFLAGS) $(LDLIBS) $^ -o $@
+	$(CXX) $^ -o $@ $(LDFLAGS) $(LDLIBS)
 
 resizeImage: resizeImage.o
-	$(CXX) $(LDFLAGS) $(LDLIBS) $^ -o $@
+	$(CXX) $^ -o $@ $(LDFLAGS) $(LDLIBS)
 
 showPixels: showPixels.o
-	$(CXX) $(LDFLAGS) $(LDLIBS) $^ -o $@
+	$(CXX) $^ -o $@ $(LDFLAGS) $(LDLIBS)
 
 %.o: %.cpp
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@

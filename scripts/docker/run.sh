@@ -9,7 +9,8 @@ IMAGE_TAG=junk
 
 # Run docker
 docker run --rm -ti --gpus=all \
+  --workdir /code/junk \
   -e "TERM=xterm-256color" \
-  -v $(pwd)/code/junk \
+  -v $(pwd):/code/junk \
   ${IMAGE_TAG} \
   /bin/zsh

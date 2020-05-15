@@ -1,10 +1,10 @@
-#include <string>
 #include <opencv2/core.hpp>
 #include <opencv2/imgcodecs.hpp>
+#include <string>
 
 #include "mtcnn.h"
 
-#define IMAGE_PATH "/home/seb/Pictures/mountains.jpg"
+#define IMAGE_PATH "/code/junk/tests/data/elephant.jpg"
 
 int main(int argc, char **argv) {
   std::string imagePath = IMAGE_PATH;

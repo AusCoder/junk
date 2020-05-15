@@ -1,13 +1,13 @@
+#include <iostream>
 #include <string>
 #include <vector>
-#include <iostream>
 
 #include <opencv2/core.hpp>
 #include <opencv2/imgcodecs.hpp>
 
 using namespace std;
 
-#define IMAGE_PATH "/home/seb/Pictures/mountains.jpg"
+#define IMAGE_PATH "/code/junk/tests/data/elephant.jpg"
 #define NUM_PIXELS 3
 
 int main(int argc, char **argv) {

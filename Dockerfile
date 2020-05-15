@@ -55,6 +55,7 @@ RUN \
     -D PYTHON_INCLUDE_DIR=/usr/include/python3.6m \
     -D PYTHON_LIBRARY=/usr/lib/x86_64-linux-gnu/libpython3.6m.so \
     -D PYTHON3_NUMPY_INCLUDE_DIRS=/usr/local/lib/python3.6/dist-packages/numpy/core/include \
+    -D OPENCV_GENERATE_PKGCONFIG=YES \
     ..
 
 RUN \
@@ -62,6 +63,11 @@ RUN \
   make -j 8 && \
   make install
 
-# ENV CUDA_INSTALL_DIR=
-# ENV OPENCV_INCLUDE_DIR=/opt/opencv/install/include
-# ENV LD_LIBRARY_PATH=/opt/opencv/install/lib:$LD_LIBRARY_PATH
+RUN \
+  echo /opt/opencv/install/lib > /etc/ld.so.conf.d/opencv4.conf && \
+  ldconfig
+
+ENV OPENCV_LIB_DIR=/opt/opencv/install/lib
+ENV OPENCV_INCLUDE_DIR=/opt/opencv/install/include/opencv4
+ENV PKG_CONFIG_PATH=/opt/opencv/install/lib/pkgconfig:$PKG_CONFIG_PATH
+ENV CUDA_INSTALL_DIR=/usr/local/cuda

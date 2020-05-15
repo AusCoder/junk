@@ -1,33 +1,27 @@
-# CUDA_INSTALL_DIR = /home/seb/cuda-10.1/cuda-toolkit
-OPENCV_INCLUDE_DIR = /usr/include/opencv4
-
-# CC = gcc-8
-# CXX = g++-8
 CXXFLAGS = -g -Wall -std=c++17
-CPPFLAGS = -I$(CUDA_INSTALL_DIR)/include -I$(OPENCV_INCLUDE_DIR) -I./include
+CPPFLAGS = -I$(CUDA_INSTALL_DIR)/include $(shell pkg-config --cflags opencv4) -I./include
 LDFLAGS = -L$(CUDA_INSTALL_DIR)/lib64 -L./lib
-# LDLIBS = -lcudart -lcnpy -lopencv_core -lopencv_imgcodecs
-LDLIBS = -lopencv_core -lopencv_imgcodecs
+LDLIBS = $(shell pkg-config --libs opencv4)  # -lcudart -lcnpy
 NVCC = $(CUDA_INSTALL_DIR)/bin/nvcc
 NVFLAGS = -g -Xcompiler -Wall
 
 mainMtcnn: mainMtcnn.o mtcnn.o
-	$(CXX) $(LDFLAGS) $(LDLIBS) $^ -o $@
+	$(CXX) $^ -o $@ $(LDFLAGS) $(LDLIBS)
 
 nmsCpu: nmsCpu.o
-	$(CXX) $(LDFLAGS) $(LDLIBS) $^ -o $@
+	$(CXX) $^ -o $@ $(LDFLAGS) $(LDLIBS)
 
 nmsGpu: nmsGpu.obj
-	$(CXX) $(LDFLAGS) $(LDLIBS) $^ -o $@
+	$(CXX) $^ -o $@ $(LDFLAGS) $(LDLIBS)
 
 generateBoxes: generateBoxes.obj
-	$(CXX) $(LDFLAGS) $(LDLIBS) $^ -o $@
+	$(CXX) $^ -o $@ $(LDFLAGS) $(LDLIBS)
 
 cropResize: cropResize.obj
-	$(CXX) $(LDFLAGS) $(LDLIBS) $^ -o $@
+	$(CXX) $^ -o $@ $(LDFLAGS) $(LDLIBS)
 
 loadNumpy: loadNumpy.o
-	$(CXX) $(LDFLAGS) -lcnpy $^ -o $@
+	$(CXX) $^ -o $@ $(LDFLAGS) -lcnpy
 
 %.o: %.cpp
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
