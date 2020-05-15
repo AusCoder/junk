@@ -9,6 +9,7 @@
 class Mtcnn {
 public:
   Mtcnn() = default;
+
   Mtcnn(const Mtcnn &) = delete;
   Mtcnn &operator=(const Mtcnn &) = delete;
   Mtcnn(Mtcnn &&) = delete;
