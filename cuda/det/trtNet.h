@@ -8,6 +8,10 @@ and Contexts etc.
 #ifndef _TRT_NET_H
 #define _TRT_NET_H
 
+#include "NvInfer.h"
+#include "NvInferUFFParser.h"
+#include "logger.h"
+
 class TrtNet {
 public:
   TrtNet() = default;
@@ -21,6 +25,7 @@ public:
                int outArrSize);
 
 private:
+  nvinfer1::ICudaEngine *engine;
 };
 
 #endif

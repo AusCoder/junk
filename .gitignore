@@ -4,9 +4,8 @@ nmsGpu
 generateBoxes
 loadNumpy
 mainMtcnn
-cuda/det/data/frzn/
-
 loggerSample
+cuda/det/data/frzn/
 
 imShow
 showPixels

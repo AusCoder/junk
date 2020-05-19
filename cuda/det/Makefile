@@ -23,6 +23,9 @@ cropResize: cropResize.obj
 loadNumpy: loadNumpy.o
 	$(CXX) $^ -o $@ $(LDFLAGS) -lcnpy
 
+loggerSample: loggerSample.o logger.o
+	$(CXX) $^ -o $@ $(LDFLAGS) $(LDLIBS)
+
 %.o: %.cpp
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
 
@@ -30,4 +33,4 @@ loadNumpy: loadNumpy.o
 	$(NVCC) $(NVFLAGS) $(CPPFLAGS) -c $< -o $@
 
 clean:
-	$(RM) *.o *.obj main nmsGpu nmsCpu generateBoxes cropResize loadNumpy mainMtcnn
+	$(RM) *.o *.obj main nmsGpu nmsCpu generateBoxes cropResize loadNumpy mainMtcnn loggerSample
