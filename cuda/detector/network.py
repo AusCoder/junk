@@ -1,5 +1,6 @@
 """Implements the main network logic required for mtcnn
 """
+from pathlib import Path
 from typing import List, Optional, Tuple
 
 import cv2
@@ -54,7 +55,7 @@ class MTCNN:
 
     @staticmethod
     def keras_predictors(*args, data_format: str = "channels_last", **kwargs):
-        from niro.research.mtcnn.models import KerasPNet, KerasRNet, KerasONet
+        from models import KerasPNet, KerasRNet, KerasONet
 
         return MTCNN(
             KerasPNet.default_model(data_format=data_format),
@@ -66,7 +67,7 @@ class MTCNN:
 
     @staticmethod
     def tf_predictors(*args, **kwargs):
-        from niro.research.mtcnn.models_tf import TFPNet, TFRNet, TFONet
+        from models import TFPNet, TFRNet, TFONet
 
         return MTCNN(
             TFPNet.default_model().start(),
@@ -80,7 +81,7 @@ class MTCNN:
     def trt_predictors(
         *args, image_size: Optional[Tuple[int, int]] = (720, 1280), **kwargs
     ):
-        from niro.research.mtcnn.models_trt import TRTPNet, TRTRNet, TRTONet
+        from models import TRTPNet, TRTRNet, TRTONet
 
         return MTCNN(
             TRTPNet.default_model().start(),
@@ -260,6 +261,7 @@ def _crop_thumbnails(image, bbox, target_size):
             )
     return resized_thumbnails
 
+
 def nms_indices(
     boxes: np.ndarray, scores: np.ndarray, iou_threshold: float
 ) -> List[int]:
@@ -306,3 +308,12 @@ def nms_indices(
         idxs = idxs[overlap < iou_threshold]
 
     return keep
+
+
+if __name__ == "__main__":
+    # Runs inference on an image
+    mtcnn = MTCNN.keras_predictors()
+    image_path = Path.cwd().parent.parent.joinpath("tests", "data", "execs.jpg")
+    image = cv2.cvtColor(cv2.imread(str(image_path)), cv2.COLOR_BGR2RGB)
+    result = mtcnn.predict(image)
+    print(result)

@@ -4,6 +4,7 @@ nmsGpu
 generateBoxes
 loadNumpy
 mainMtcnn
+cuda/detector/data/frzn/
 
 loggerSample
 
@@ -19,3 +20,5 @@ writeWebcam
 
 env
 .vscode
+
+__pycache__

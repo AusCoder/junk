@@ -8,19 +8,14 @@ ARG OPENCV_VERSION=4.3.0
 
 RUN \
   apt update && \
-  apt upgrade -y
-RUN \
+  apt upgrade -y && \
   apt install -y --no-install-recommends \
-    zsh \
+    zsh bash \
     build-essential cmake unzip pkg-config wget \
     libjpeg-dev libpng-dev libtiff-dev \
     libavcodec-dev libavformat-dev libswscale-dev libv4l-dev \
     libxvidcore-dev libx264-dev \
     python3-dev python3-numpy
-
-RUN \
-  apt install -y --no-install-recommends \
-    bash
 
 # Build opencv with cuda support
 RUN \
@@ -66,6 +61,13 @@ RUN \
 RUN \
   echo /opt/opencv/install/lib > /etc/ld.so.conf.d/opencv4.conf && \
   ldconfig
+
+RUN \
+  apt install -y --no-install-recommends \
+    libsm-dev \
+  python -m pip install \
+    opencv-python \
+    tensorflow==1.15.0
 
 ENV OPENCV_LIB_DIR=/opt/opencv/install/lib
 ENV OPENCV_INCLUDE_DIR=/opt/opencv/install/include/opencv4
