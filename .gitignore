@@ -4,7 +4,7 @@ nmsGpu
 generateBoxes
 loadNumpy
 mainMtcnn
-cuda/detector/data/frzn/
+cuda/det/data/frzn/
 
 loggerSample
 
