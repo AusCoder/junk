@@ -3,6 +3,7 @@ from collections import namedtuple
 from pathlib import Path
 from typing import Dict, Any, List, Tuple, Optional
 
+import uff
 import numpy as np
 from tensorflow.keras import backend as K_tf, layers, Model
 import tensorflow as tf
@@ -58,6 +59,12 @@ def freeze_and_save_tf_keras_model(model, output_path: Path) -> None:
         f"Output names: {graph.output_names}. Output shapes: {graph.output_shapes}."
     )
     logger.info(f"Output path: {output_path}")
+
+
+def freeze_tf_keras_model_to_uff(model):
+    frozen_graph_with_info = freeze_tf_keras_model(model)
+    uff_graph_def = uff.from_tensorflow(frozen_graph_with_info.frozen_graph)
+    return frozen_graph_with_info, uff_graph_def
 
 
 def create_pnet(data_format: str, input_shape: Tuple[Optional[int], Optional[int]]):
@@ -334,6 +341,9 @@ class _KerasMTCNNNet:
     def freeze_and_save(self, output_path: Path) -> None:
         freeze_and_save_tf_keras_model(self.model, output_path)
 
+    def freeze_to_uff(self):
+        return freeze_tf_keras_model_to_uff(self.model)
+
 
 class KerasPNet(_KerasMTCNNNet):
     _net_name = "pnet"
@@ -373,4 +383,7 @@ if __name__ == "__main__":
     outdir.mkdir(exist_ok=True, parents=True)
 
     pnet216x384 = KerasPNet.default_model(input_shape=(216, 384))
-    pnet216x384.freeze_and_save(outdir.joinpath(f"pnet{216}x{384}.pb"))
+    frozen_graph_with_info, uff_graph_def = pnet216x384.freeze_to_uff()
+    # pnet216x384.freeze_and_save(outdir.joinpath(f"pnet{216}x{384}.pb"))
+
+    # uff_outdir = Path.cwd().joinpath("data", "uff")
