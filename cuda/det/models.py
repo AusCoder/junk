@@ -11,10 +11,21 @@ import tensorflow as tf
 logger = logging.getLogger(__name__)
 
 
-FrozenGraphWithInfo = namedtuple(
-    "FrozenGraphWithInfo",
-    ["frozen_graph", "input_names", "input_shapes", "output_names", "output_shapes"],
-)
+class FrozenGraphWithInfo:
+    def __init__(
+        self, frozen_graph, input_names, input_shapes, output_names, output_shapes
+    ):
+        self.frozen_graph = frozen_graph
+        self.input_names = input_names
+        self.input_shapes = input_shapes
+        self.output_names = output_names
+        self.output_shapes = output_shapes
+
+    def __repr__(self):
+        rendered_attrs = ", ".join(
+            f"{k}={v}" for k, v in self.__dict__.items() if k != "frozen_graph"
+        )
+        return f"{self.__class__.__name__}({rendered_attrs})"
 
 
 def freeze_tf_keras_model(model) -> FrozenGraphWithInfo:
@@ -384,6 +395,9 @@ if __name__ == "__main__":
 
     pnet216x384 = KerasPNet.default_model(input_shape=(216, 384))
     frozen_graph_with_info, uff_graph_def = pnet216x384.freeze_to_uff()
+    print(frozen_graph_with_info)
     # pnet216x384.freeze_and_save(outdir.joinpath(f"pnet{216}x{384}.pb"))
 
-    # uff_outdir = Path.cwd().joinpath("data", "uff")
+    uff_outdir = Path.cwd().joinpath("data", "uff")
+    uff_outdir.mkdir(exist_ok=True, parents=True)
+    uff_outdir.joinpath("pnet_216x384.uff").write_bytes(uff_graph_def)

@@ -1,11 +1,11 @@
 CXXFLAGS = -g -Wall -std=c++17
 CPPFLAGS = -I$(CUDA_INSTALL_DIR)/include $(shell pkg-config --cflags opencv4) -I./include
 LDFLAGS = -L$(CUDA_INSTALL_DIR)/lib64 -L./lib
-LDLIBS = $(shell pkg-config --libs opencv4)  # -lcudart -lcnpy
+LDLIBS = $(shell pkg-config --libs opencv4) -lnvinfer -lnvinfer_plugin -lnvparsers  -lcudart # -lcnpy
 NVCC = $(CUDA_INSTALL_DIR)/bin/nvcc
 NVFLAGS = -g -Xcompiler -Wall
 
-mainMtcnn: mainMtcnn.o mtcnn.o
+mainMtcnn: mainMtcnn.o mtcnn.o trtNet.o logger.o
 	$(CXX) $^ -o $@ $(LDFLAGS) $(LDLIBS)
 
 nmsCpu: nmsCpu.o

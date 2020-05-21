@@ -6,6 +6,8 @@ loadNumpy
 mainMtcnn
 loggerSample
 cuda/det/data/frzn/
+cuda/det/data/uff/
+cuda/det/data/pkgs/
 
 imShow
 showPixels
@@ -21,3 +23,4 @@ env
 .vscode
 
 __pycache__
+venv

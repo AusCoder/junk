@@ -4,12 +4,12 @@
 #include "NvInferRuntimeCommon.h"
 #include <string>
 
-class Logger : public ILogger {
+class Logger : public nvinfer1::ILogger {
 public:
   void log(nvinfer1::ILogger::Severity severity, const char *msg) override;
 
 private:
-  static std::string renderSeverity(nvinfer1::ILogger::Severity severity) const;
+  static std::string renderSeverity(nvinfer1::ILogger::Severity severity);
 };
 
 extern Logger gLogger;

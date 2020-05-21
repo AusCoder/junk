@@ -1,4 +1,5 @@
 #include "mtcnn.h"
+#include "trtNet.h"
 
 #include <iostream>
 #include <opencv2/core/cuda.hpp>
@@ -6,6 +7,8 @@
 #include <opencv2/imgproc.hpp>
 
 void Mtcnn::predict(cv::Mat image) {
+  TrtNet pnet;
+  pnet.start();
   image.convertTo(image, CV_32FC3);
   Mtcnn::stageOne(image);
 }

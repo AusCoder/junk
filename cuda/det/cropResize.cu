@@ -98,7 +98,7 @@ __global__ void cropResizeKernel(
 
 vector<float> runCropResize(const vector<float> &image, int imageWidth,
                             int imageHeight, int depth,
-                            const vector<float> &boxes, int boxesSize,
+                            vector<float> &boxes, int boxesSize,
                             int cropWidth, int cropHeight) {
   int croppedBoxesSize = boxesSize * cropWidth * cropHeight * depth;
   vector<float> croppedBoxes(croppedBoxesSize);
@@ -141,22 +141,39 @@ int main(int argc, char **argv) {
   //                     3.0, 3.0, 3.0, 4.0, 4.0, 4.0};
 
   std::string imagePath =
-      "/home/seb/code/ii/ml-source/data/sample_images/execs.jpg";
+      "../../tests/data/execs.jpg";
   cv::Mat image = cv::imread(imagePath, cv::IMREAD_COLOR);
-  // image.convertTo(image, cv::CV_32FC3);
+  image.convertTo(image, CV_32FC3);
 
-  cv::Vec3f point = image.at<cv::Vec3f>(0, 0);
-  cout << point[0] << endl;
+  int imageWidth = image.cols;
+  int imageHeight = image.rows;
+  int depth = image.depth();
 
-  // vector<float> boxes = {0.3, 0.3, 0.7, 0.7};
-  // int boxesSize = 1;
-  // int cropHeight = 9;
-  // int cropWidth = 9;
+  vector<float> imageArr (imageHeight * imageWidth * depth);
+  for (int i = 0; i < imageHeight; i++) {
+    float *ptr = image.ptr<float>(i);
+    for (int j = 0; j < imageWidth; j++) {
+      imageArr[i * imageWidth + j] = ptr[j];
+    }
+  }
 
-  // auto croppedBoxes = runCropResize(image, imageWidth, imageHeight, depth,
-  //                                   boxes, boxesSize, cropHeight, cropWidth);
+  //cout << imageArr[0] << " " << imageArr[1] << " " << imageArr[2] << endl;
 
-  // for (auto &val : croppedBoxes) {
+  vector<float> boxes = {0.3, 0.3, 0.7, 0.7};
+  int boxesSize = 1;
+  int cropHeight = 50;
+  int cropWidth = 50;
+
+  auto croppedBoxesArr = runCropResize(imageArr, imageWidth, imageHeight, depth,
+                                    boxes, boxesSize, cropHeight, cropWidth);
+  cv::Mat croppedImage {cropHeight, cropWidth, CV_32FC3, croppedBoxesArr.data()};
+  cv::Vec3f point = croppedImage.at<cv::Vec3f>(0);
+  cout << point[0] << " " << point[1] << " " << point[2] << endl;
+
+  croppedImage.convertTo(croppedImage, CV_8UC3);
+  cv::imwrite("cropTest.jpg", croppedImage);
+
+  // for (auto &val : croppedBoxesArr) {
   //   cout << val << ", ";
   // }
   // cout << endl;
