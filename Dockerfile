@@ -65,7 +65,7 @@ RUN \
 RUN \
   apt install -y --no-install-recommends \
     libsm-dev \
-  python -m pip install \
+  && python -m pip install \
     opencv-python \
     tensorflow==1.15.0
 
