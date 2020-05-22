@@ -17,14 +17,20 @@ nmsGpu: nmsGpu.obj
 generateBoxes: generateBoxes.obj
 	$(CXX) $^ -o $@ $(LDFLAGS) $(LDLIBS)
 
-cropResize: cropResize.obj
+cropResize: cropResize.obj common.o
 	$(CXX) $^ -o $@ $(LDFLAGS) $(LDLIBS)
+
+cropResizeCpu: cropResize.o common.o
+	$(CXX) $^ -o $@ $(LDFLAGS) -lopencv_core -lopencv_imgcodecs
 
 loadNumpy: loadNumpy.o
 	$(CXX) $^ -o $@ $(LDFLAGS) -lcnpy
 
 loggerSample: loggerSample.o logger.o
 	$(CXX) $^ -o $@ $(LDFLAGS) $(LDLIBS)
+
+test: test_common.o common.o
+	$(CXX) $^ -o $@ $(LDFLAGS) -lopencv_core -lopencv_imgcodecs
 
 %.o: %.cpp
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
@@ -33,4 +39,5 @@ loggerSample: loggerSample.o logger.o
 	$(NVCC) $(NVFLAGS) $(CPPFLAGS) -c $< -o $@
 
 clean:
-	$(RM) *.o *.obj main nmsGpu nmsCpu generateBoxes cropResize loadNumpy mainMtcnn loggerSample
+	$(RM) *.o *.obj main nmsGpu nmsCpu generateBoxes \
+		cropResize cropResizeCpu loadNumpy mainMtcnn loggerSample test

@@ -4,13 +4,8 @@
 #include <sstream>
 #include <string>
 
-#define CUDACHECK(status)                                                      \
-  do {                                                                         \
-    if (status != 0) {                                                         \
-      cerr << "CUDA_FAIL: " << cudaGetErrorString(status) << endl;             \
-      abort();                                                                 \
-    }                                                                          \
-  } while (0)
+#include <opencv2/core.hpp>
+#include <opencv2/imgcodecs.hpp>
 
 struct Prob {
   float x;
@@ -25,5 +20,10 @@ struct Prob {
     return ss.str();
   }
 };
+
+enum class ChannelSwapType { CHWtoHWC, HWCtoCHW };
+
+void channelSwap(const float *image, int imageWidth, int imageHeight, int depth,
+                 ChannelSwapType type, float *out);
 
 #endif

@@ -65,9 +65,10 @@ RUN \
 RUN \
   apt install -y --no-install-recommends \
     libsm-dev \
+  && python -m pip install --upgrade pip \
   && python -m pip install \
     opencv-python \
-    tensorflow==1.15.0
+    tensorflow==1.14.0
 
 ENV OPENCV_LIB_DIR=/opt/opencv/install/lib
 ENV OPENCV_INCLUDE_DIR=/opt/opencv/install/include/opencv4

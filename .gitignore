@@ -3,6 +3,8 @@ nmsCpu
 nmsGpu
 generateBoxes
 loadNumpy
+cropResize
+cropResizeCpu
 mainMtcnn
 loggerSample
 cuda/det/data/frzn/
@@ -14,6 +16,8 @@ showPixels
 resizeImage
 
 writeWebcam
+
+test
 
 *.o
 *.obj
