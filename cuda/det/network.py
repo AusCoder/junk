@@ -7,6 +7,10 @@ import cv2
 import numpy as np
 
 
+DEFAULT_MIN_SIZE = 40
+DEFAULT_SCALE_FACTOR = 0.709
+
+
 class MTCNN:
     def __init__(
         self,
@@ -14,8 +18,8 @@ class MTCNN:
         rnet,
         onet,
         thresholds: Optional[List[float]] = None,
-        factor: float = 0.709,
-        min_face_magnitude: int = 40,
+        factor: float = DEFAULT_SCALE_FACTOR,
+        min_face_magnitude: int = DEFAULT_MIN_SIZE,
         image_size: Optional[Tuple[int, int]] = None,
     ):
         self.pnet = pnet
@@ -103,8 +107,9 @@ def stage_one(pnet, image, min_size, factor, threshold):
     regs = []
     bboxs = []
     for scale in scales:  # TODO: we can reduce the number of scales and save some time
-        width_scaled = int(np.ceil(width * scale))
-        height_scaled = int(np.ceil(height * scale))
+        height_scaled, width_scaled = compute_height_width_at_scale(
+            scale, height, width
+        )
         resized_image = cv2.resize(
             image, (width_scaled, height_scaled), interpolation=cv2.INTER_AREA
         )
@@ -232,6 +237,12 @@ def compute_scales(min_size, factor, height, width):
         scale *= factor
         cur_side *= factor
     return scales
+
+
+def compute_height_width_at_scale(scale, height, width):
+    width_scaled = int(np.ceil(width * scale))
+    height_scaled = int(np.ceil(height * scale))
+    return height_scaled, width_scaled
 
 
 def regress_box(bbox, reg):

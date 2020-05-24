@@ -11,6 +11,10 @@ import tensorflow as tf
 logger = logging.getLogger(__name__)
 
 
+def clear_keras_session():
+    K_tf.clear_session()
+
+
 class FrozenGraphWithInfo:
     def __init__(
         self, frozen_graph, input_names, input_shapes, output_names, output_shapes
