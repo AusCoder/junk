@@ -15,6 +15,9 @@ TrtNet::~TrtNet() {
   }
 }
 
+/**
+ * Can we put more than one graph in a ICudaEngine?
+ */
 void TrtNet::start() {
   std::string uffFile = "data/uff/pnet_216x384.uff";
 
@@ -40,6 +43,18 @@ void TrtNet::start() {
   std::cout << "Created ICudaEngine" << std::endl;
 }
 
-void TrtNet::predict() {
-  // TODO: make an array of ones and test the network on that
+// void TrtNet::predict() {
+//   // TODO: make an array of ones and test the network on that
+// }
+
+void TrtNet::predict(float *image, int height, int width, float *outArr,
+                     int outArrSize) {
+  int inputIndex = engine->getBindingIndex("input_1");
+  int outputIndex1 = engine->getBindingIndex("softmax/Softmax");
+  int outputIndex2 = engine->getBindingIndex("conv2d_4/BiasAdd");
+
+  // TODO: copy image to gpu
+  void *buffers[3];
+  buffers[inputIndex] = inputbuffer;
+  buffers[outputIndex1] = outputBuffer;
 }
