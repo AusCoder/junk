@@ -3,6 +3,12 @@
 #include <iostream>
 #include <string>
 
+// TODO: fix the shapes here
+TrtNet::TrtNet()
+    : inputName{"input_1"}, outputProbName{"softmax/Softmax"},
+      outputRegName{"conv2d_4/BiasAdd"}, inputShape{384, 216, 3},
+      outputProbShape{1, 1, 1}, outputRegShape{1, 1, 1} {}
+
 TrtNet::~TrtNet() {
   if (builder != nullptr) {
     builder->destroy();
@@ -25,8 +31,7 @@ void TrtNet::start() {
   nvinfer1::INetworkDefinition *network = builder->createNetworkV2(0U);
 
   nvuffparser::IUffParser *parser = nvuffparser::createUffParser();
-  parser->registerInput("input_1", nvinfer1::Dims3(384, 216, 3),
-                        nvuffparser::UffInputOrder::kNHWC);
+  parser->registerInput("input_1", , nvuffparser::UffInputOrder::kNHWC);
   parser->registerOutput("softmax/Softmax");
   parser->registerOutput("conv2d_4/BiasAdd");
   parser->parse(uffFile.c_str(), *network, nvinfer1::DataType::kFLOAT);
@@ -43,18 +48,27 @@ void TrtNet::start() {
   std::cout << "Created ICudaEngine" << std::endl;
 }
 
-// void TrtNet::predict() {
-//   // TODO: make an array of ones and test the network on that
-// }
+/**
+ * For now, we assume image is a cpu array
+ */
+void TrtNet::predict(float *image, int height, int width, int channels,
+                     float *outArr, int outArrSize) {
+  // TODO: add check for height, width, channels to match the inputShape
+  int inputIndex = engine->getBindingIndex(inputName.c_str());
+  int outputIndex1 = engine->getBindingIndex(outputProbName.c_str());
+  int outputIndex2 = engine->getBindingIndex(outputRegName.c_str());
 
-void TrtNet::predict(float *image, int height, int width, float *outArr,
-                     int outArrSize) {
-  int inputIndex = engine->getBindingIndex("input_1");
-  int outputIndex1 = engine->getBindingIndex("softmax/Softmax");
-  int outputIndex2 = engine->getBindingIndex("conv2d_4/BiasAdd");
+  float *dImage;
+  float *dOutputProb;
+  float *dOutputReg;
 
-  // TODO: copy image to gpu
+  int imageSize = inputShape.d[0] * inputShape.d[1] * inputShape.d[2];
+  CUDACHECK(cudaMalloc((void **)&dImage, sizeof(float) * imageSize));
+
+  CUDACHECK(cudaMemcpy((void *)dImage, (void *)image, sizeof(float) * imageSize,
+                       cudaMemcpyHostToDevice));
+
   void *buffers[3];
-  buffers[inputIndex] = inputbuffer;
+  buffers[inputIndex] = dImage;
   buffers[outputIndex1] = outputBuffer;
 }

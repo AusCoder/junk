@@ -14,7 +14,7 @@ and Contexts etc.
 
 class TrtNet {
 public:
-  TrtNet() = default;
+  TrtNet();
   ~TrtNet();
 
   TrtNet(const TrtNet &) = delete;
@@ -25,13 +25,21 @@ public:
   void start();
   // void predict();
 
-  void predict(float *image, int height, int width, float *outArr,
+  void predict(float *image, int height, int width, int channels, float *outArr,
                int outArrSize);
 
 private:
   nvinfer1::IBuilder *builder = nullptr;
   nvinfer1::ICudaEngine *engine = nullptr;
   nvinfer1::IExecutionContext *context = nullptr;
+
+  std::string inputName;
+  std::string outputProbName;
+  std::string outputRegName;
+
+  nvinfer1::Dims3 inputShape;
+  nvinfer1::Dims3 outputProbShape;
+  nvinfer1::Dims3 outputRegShape;
 };
 
 #endif
