@@ -23,10 +23,9 @@ public:
   TrtNet &operator=(TrtNet &&) = delete;
 
   void start();
-  // void predict();
 
-  void predict(float *image, int height, int width, int channels, float *outArr,
-               int outArrSize);
+  predict(float *image, int height, int width, int channels, float *outputProb,
+          int outputProbSize, float *outputReg, int outputRegSize);
 
 private:
   nvinfer1::IBuilder *builder = nullptr;

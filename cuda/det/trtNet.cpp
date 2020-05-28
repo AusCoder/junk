@@ -1,4 +1,5 @@
 #include "trtNet.h"
+#include "commonCuda.h"
 
 #include <iostream>
 #include <string>
@@ -31,13 +32,13 @@ void TrtNet::start() {
   nvinfer1::INetworkDefinition *network = builder->createNetworkV2(0U);
 
   nvuffparser::IUffParser *parser = nvuffparser::createUffParser();
-  parser->registerInput("input_1", , nvuffparser::UffInputOrder::kNHWC);
-  parser->registerOutput("softmax/Softmax");
-  parser->registerOutput("conv2d_4/BiasAdd");
+  parser->registerInput(inputName.c_str(), , nvuffparser::UffInputOrder::kNHWC);
+  parser->registerOutput(outputProbName.c_str());
+  parser->registerOutput(outputRegName.c_str());
   parser->parse(uffFile.c_str(), *network, nvinfer1::DataType::kFLOAT);
   parser->destroy();
 
-  builder->setMaxBatchSize(16);
+  builder->setMaxBatchSize(4);
   nvinfer1::IBuilderConfig *config = builder->createBuilderConfig();
   config->setMaxWorkspaceSize(1 << 20);
   engine = builder->buildEngineWithConfig(*network, *config);
@@ -52,23 +53,36 @@ void TrtNet::start() {
  * For now, we assume image is a cpu array
  */
 void TrtNet::predict(float *image, int height, int width, int channels,
-                     float *outArr, int outArrSize) {
+                     float *outputProb, int outputProbSize, float *outputReg,
+                     int outputRegSize) {
   // TODO: add check for height, width, channels to match the inputShape
   int inputIndex = engine->getBindingIndex(inputName.c_str());
-  int outputIndex1 = engine->getBindingIndex(outputProbName.c_str());
-  int outputIndex2 = engine->getBindingIndex(outputRegName.c_str());
+  int outputIndexProb = engine->getBindingIndex(outputProbName.c_str());
+  int outputIndexReg = engine->getBindingIndex(outputRegName.c_str());
 
   float *dImage;
   float *dOutputProb;
   float *dOutputReg;
 
-  int imageSize = inputShape.d[0] * inputShape.d[1] * inputShape.d[2];
+  int imageSize = dimsSize(inputShape);
   CUDACHECK(cudaMalloc((void **)&dImage, sizeof(float) * imageSize));
+  CUDACHECK(cudaMalloc((void **)&dOutputProb,
+                       sizeof(float) * dimsSize(outputProbShape)));
+  CUDACHECK(cudaMalloc((void **)&dOutputReg,
+                       sizeof(float) * dimsSize(outputRegShape)));
 
   CUDACHECK(cudaMemcpy((void *)dImage, (void *)image, sizeof(float) * imageSize,
                        cudaMemcpyHostToDevice));
 
   void *buffers[3];
   buffers[inputIndex] = dImage;
-  buffers[outputIndex1] = outputBuffer;
+  buffers[outputIndexProb] = dOutputProb;
+  buffers[outputIndexReg] = dOutputReg;
+
+  context->execute(1, buffers);
+
+  CUDACHECK(cudaMemcpy((void *)outputProb, (void *)dOutputProb,
+                       sizeof(float) * outputProbSize, cudaMemcpyDeviceToHost));
+  CUDACHECK(cudaMemcpy((void *)outputReg, (void *)dOutputReg,
+                       sizeof(float) * outputRegSize, cudaMemcpyDeviceToHost));
 }
