@@ -17,8 +17,9 @@ def clear_keras_session():
 
 class FrozenGraphWithInfo:
     def __init__(
-        self, frozen_graph, input_names, input_shapes, output_names, output_shapes
+        self, name, frozen_graph, input_names, input_shapes, output_names, output_shapes
     ):
+        self.name = name
         self.frozen_graph = frozen_graph
         self.input_names = input_names
         self.input_shapes = input_shapes
@@ -32,7 +33,7 @@ class FrozenGraphWithInfo:
         return f"{self.__class__.__name__}({rendered_attrs})"
 
 
-def freeze_tf_keras_model(model) -> FrozenGraphWithInfo:
+def freeze_tf_keras_model(name: str, model) -> FrozenGraphWithInfo:
     """
     Note: there are potentially 2 versions of keras floating around
     one from Keras and one from tensorflow.keras.
@@ -50,6 +51,7 @@ def freeze_tf_keras_model(model) -> FrozenGraphWithInfo:
         sess, graph_def, output_names
     )
     return FrozenGraphWithInfo(
+        name=name,
         frozen_graph=frozen_graph,
         input_names=input_names,
         input_shapes=input_shapes,
@@ -58,8 +60,8 @@ def freeze_tf_keras_model(model) -> FrozenGraphWithInfo:
     )
 
 
-def freeze_and_save_tf_keras_model(model, output_path: Path) -> None:
-    graph = freeze_tf_keras_model(model)
+def freeze_and_save_tf_keras_model(name, model, output_path: Path) -> None:
+    graph = freeze_tf_keras_model(name, model)
     tf.train.write_graph(
         graph.frozen_graph,
         str(output_path.parent),
@@ -76,8 +78,8 @@ def freeze_and_save_tf_keras_model(model, output_path: Path) -> None:
     logger.info(f"Output path: {output_path}")
 
 
-def freeze_tf_keras_model_to_uff(model):
-    frozen_graph_with_info = freeze_tf_keras_model(model)
+def freeze_tf_keras_model_to_uff(name, model):
+    frozen_graph_with_info = freeze_tf_keras_model(name, model)
     uff_graph_def = uff.from_tensorflow(frozen_graph_with_info.frozen_graph)
     return frozen_graph_with_info, uff_graph_def
 
@@ -314,6 +316,7 @@ _model_paths = {
 
 
 class _KerasMTCNNNet:
+    _net_name = None
     _factories = {"pnet": create_pnet, "rnet": create_rnet, "onet": create_onet}
     _weight_formatters = {
         "pnet": format_pnet_weights,
@@ -351,13 +354,13 @@ class _KerasMTCNNNet:
         return self.predict(*args, **kwargs)
 
     def freeze(self) -> Any:
-        return freeze_tf_keras_model(self.model)
+        return freeze_tf_keras_model(self._net_name, self.model)
 
     def freeze_and_save(self, output_path: Path) -> None:
-        freeze_and_save_tf_keras_model(self.model, output_path)
+        freeze_and_save_tf_keras_model(self._net_name, self.model, output_path)
 
     def freeze_to_uff(self):
-        return freeze_tf_keras_model_to_uff(self.model)
+        return freeze_tf_keras_model_to_uff(self._net_name, self.model)
 
 
 class KerasPNet(_KerasMTCNNNet):

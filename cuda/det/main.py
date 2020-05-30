@@ -54,6 +54,8 @@ def save_uff():
     height, width = DEFAULT_HEIGHT, DEFAULT_WIDTH
     scales = compute_scales(DEFAULT_MIN_SIZE, DEFAULT_SCALE_FACTOR, height, width)
 
+    frozen_graph_infos = []
+
     for scale in scales:
         scaled_height, scaled_width = compute_height_width_at_scale(
             scale, height, width
@@ -61,21 +63,27 @@ def save_uff():
         graph_name = f"pnet_{scaled_height}x{scaled_width}"
 
         pnet = KerasPNet.default_model(input_shape=(scaled_height, scaled_width))
-        _, uff_graph_def = pnet.freeze_to_uff()
+        frozen_graph_info, uff_graph_def = pnet.freeze_to_uff()
+        frozen_graph_infos.append(frozen_graph_info)
 
         uff_outdir.joinpath(f"{graph_name}.uff").write_bytes(uff_graph_def)
         pnet.freeze_and_save(tf_outdir.joinpath(f"pnet_{graph_name}.pb"))
         clear_keras_session()
 
     rnet = KerasRNet.default_model()
-    _, uff_graph_def = rnet.freeze_to_uff()
+    frozen_graph_info, uff_graph_def = rnet.freeze_to_uff()
     uff_outdir.joinpath(f"rnet.uff").write_bytes(uff_graph_def)
     rnet.freeze_and_save(tf_outdir.joinpath(f"rnet.pb"))
+    frozen_graph_infos.append(frozen_graph_info)
 
     onet = KerasONet.default_model()
-    _, uff_graph_def = onet.freeze_to_uff()
+    frozen_graph_info, uff_graph_def = onet.freeze_to_uff()
     uff_outdir.joinpath(f"onet.uff").write_bytes(uff_graph_def)
     onet.freeze_and_save(tf_outdir.joinpath(f"onet.pb"))
+    frozen_graph_infos.append(frozen_graph_info)
+
+    for info in frozen_graph_infos:
+        click.echo(info)
 
 
 if __name__ == "__main__":

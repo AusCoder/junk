@@ -8,7 +8,7 @@
 TrtNet::TrtNet()
     : inputName{"input_1"}, outputProbName{"softmax/Softmax"},
       outputRegName{"conv2d_4/BiasAdd"}, inputShape{384, 216, 3},
-      outputProbShape{1, 1, 1}, outputRegShape{1, 1, 1} {}
+      outputProbShape{187, 103, 2}, outputRegShape{187, 103, 4} {}
 
 TrtNet::~TrtNet() {
   if (builder != nullptr) {
