@@ -1,9 +1,9 @@
-CXXFLAGS = -g -Wall -std=c++17
+CXXFLAGS = -g -Wall -std=c++14
 CPPFLAGS = -I$(CUDA_INSTALL_DIR)/include $(shell pkg-config --cflags opencv4) -I./include
 LDFLAGS = -L$(CUDA_INSTALL_DIR)/lib64 -L./lib
 LDLIBS = $(shell pkg-config --libs opencv4) -lnvinfer -lnvinfer_plugin -lnvparsers  -lcudart # -lcnpy
 NVCC = $(CUDA_INSTALL_DIR)/bin/nvcc
-NVFLAGS = -g -Xcompiler -Wall
+NVFLAGS = -g -Xcompiler -Wall -Xcompiler -std=c++14
 
 mainMtcnn: mainMtcnn.o mtcnn.o trtNet.o logger.o
 	$(CXX) $^ -o $@ $(LDFLAGS) $(LDLIBS)
@@ -29,8 +29,11 @@ loadNumpy: loadNumpy.o
 loggerSample: loggerSample.o logger.o
 	$(CXX) $^ -o $@ $(LDFLAGS) $(LDLIBS)
 
-test: test_common.o common.o
+test_common: test_common.o common.o
 	$(CXX) $^ -o $@ $(LDFLAGS) -lopencv_core -lopencv_imgcodecs
+
+test_trtNet: test_trtNet.o trtNet.obj commonCuda.obj logger.o
+	$(CXX) $^ -o $@ $(LDFLAGS) $(LDLIBS)
 
 %.o: %.cpp
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
@@ -40,4 +43,5 @@ test: test_common.o common.o
 
 clean:
 	$(RM) *.o *.obj main nmsGpu nmsCpu generateBoxes \
-		cropResize cropResizeCpu loadNumpy mainMtcnn loggerSample test
+		cropResize cropResizeCpu loadNumpy mainMtcnn loggerSample test_common \
+		test_trtNet

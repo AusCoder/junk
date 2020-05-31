@@ -17,7 +17,8 @@ resizeImage
 
 writeWebcam
 
-test
+test_common
+test_trtNet
 
 *.o
 *.obj

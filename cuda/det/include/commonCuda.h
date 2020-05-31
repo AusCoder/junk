@@ -2,13 +2,15 @@
 #define _COMMON_CUDA_H
 
 #include <exception>
+#include <iostream>
 
+#include "cuda_runtime.h"
 #include "NvInferRuntimeCommon.h"
 
 #define CUDACHECK(status)                                                      \
   do {                                                                         \
     if (status != 0) {                                                         \
-      cerr << "CUDA_FAIL: " << cudaGetErrorString(status) << endl;             \
+      std::cerr << "CUDA_FAIL: " << cudaGetErrorString(status) << std::endl;             \
       abort();                                                                 \
     }                                                                          \
   } while (0)

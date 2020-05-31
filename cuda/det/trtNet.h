@@ -12,8 +12,19 @@ and Contexts etc.
 #include "NvUffParser.h"
 #include "logger.h"
 
+#include <map>
+#include <utility>
+
+struct TrtNetInfo {
+  TrtNetInfo(nvinfer1::Dims3 in);
+
+  nvinfer1::Dims3 inputShape;
+};
+
 class TrtNet {
 public:
+  static std::map<std::pair<int, int>, TrtNetInfo> TRT_NET_INFO;
+
   TrtNet();
   ~TrtNet();
 
@@ -24,7 +35,7 @@ public:
 
   void start();
 
-  predict(float *image, int height, int width, int channels, float *outputProb,
+  void predict(float *image, int height, int width, int channels, float *outputProb,
           int outputProbSize, float *outputReg, int outputRegSize);
 
 private:

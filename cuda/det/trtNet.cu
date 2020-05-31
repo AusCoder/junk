@@ -1,8 +1,15 @@
 #include "trtNet.h"
 #include "commonCuda.h"
+#include "logger.h"
 
 #include <iostream>
 #include <string>
+
+TrtNetInfo::TrtNetInfo(nvinfer1::Dims3 in): inputShape{in} {}
+
+std::map<std::pair<int, int>, TrtNetInfo> TrtNet::TRT_NET_INFO = {
+  {{384, 216}, {{384, 216, 3}}},
+};
 
 // TODO: fix the shapes here
 TrtNet::TrtNet()
@@ -32,7 +39,7 @@ void TrtNet::start() {
   nvinfer1::INetworkDefinition *network = builder->createNetworkV2(0U);
 
   nvuffparser::IUffParser *parser = nvuffparser::createUffParser();
-  parser->registerInput(inputName.c_str(), , nvuffparser::UffInputOrder::kNHWC);
+  parser->registerInput(inputName.c_str(), inputShape, nvuffparser::UffInputOrder::kNHWC);
   parser->registerOutput(outputProbName.c_str());
   parser->registerOutput(outputRegName.c_str());
   parser->parse(uffFile.c_str(), *network, nvinfer1::DataType::kFLOAT);
