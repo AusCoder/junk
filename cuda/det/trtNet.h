@@ -16,9 +16,15 @@ and Contexts etc.
 #include <utility>
 
 struct TrtNetInfo {
-  TrtNetInfo(nvinfer1::Dims3 in);
+  TrtNetInfo(nvinfer1::Dims3 in, nvinfer1::Dims3 outProb,
+             nvinfer1::Dims3 outReg);
+  TrtNetInfo(nvinfer1::Dims3 in, nvinfer1::Dims3 outProb,
+             nvinfer1::Dims3 outReg, nvinfer1::Dims3 outLand);
 
   nvinfer1::Dims3 inputShape;
+  nvinfer1::Dims3 outputProbShape;
+  nvinfer1::Dims3 outputRegShape;
+  nvinfer1::Dims3 outputLandmarksShape;
 };
 
 class TrtNet {
@@ -35,8 +41,12 @@ public:
 
   void start();
 
-  void predict(float *image, int height, int width, int channels, float *outputProb,
-          int outputProbSize, float *outputReg, int outputRegSize);
+  void predict(float *image, int imageSize, float *outputProb,
+               int outputProbSize, float *outputReg, int outputRegSize);
+
+  nvinfer1::Dims3 getInputShape();
+  nvinfer1::Dims3 getOutputProbShape();
+  nvinfer1::Dims3 getOutputRegShape();
 
 private:
   nvinfer1::IBuilder *builder = nullptr;

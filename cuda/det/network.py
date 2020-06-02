@@ -17,6 +17,7 @@ class MTCNN:
         pnet,
         rnet,
         onet,
+        *,
         thresholds: Optional[List[float]] = None,
         factor: float = DEFAULT_SCALE_FACTOR,
         min_face_magnitude: int = DEFAULT_MIN_SIZE,
@@ -58,40 +59,35 @@ class MTCNN:
         return boxes, landmarks
 
     @staticmethod
-    def keras_predictors(*args, data_format: str = "channels_last", **kwargs):
+    def keras_predictors(data_format: str = "channels_last", **kwargs):
         from models import KerasPNet, KerasRNet, KerasONet
 
         return MTCNN(
             KerasPNet.default_model(data_format=data_format),
             KerasRNet.default_model(data_format=data_format),
             KerasONet.default_model(data_format=data_format),
-            *args,
             **kwargs,
         )
 
     @staticmethod
-    def tf_predictors(*args, **kwargs):
+    def tf_predictors(**kwargs):
         from models import TFPNet, TFRNet, TFONet
 
         return MTCNN(
             TFPNet.default_model().start(),
             TFRNet.default_model().start(),
             TFONet.default_model().start(),
-            *args,
             **kwargs,
         )
 
     @staticmethod
-    def trt_predictors(
-        *args, image_size: Optional[Tuple[int, int]] = (720, 1280), **kwargs
-    ):
+    def trt_predictors(image_size: Optional[Tuple[int, int]] = (720, 1280), **kwargs):
         from models import TRTPNet, TRTRNet, TRTONet
 
         return MTCNN(
             TRTPNet.default_model().start(),
             TRTRNet.default_model().start(),
             TRTONet.default_model().start(),
-            *args,
             image_size=image_size,
             **kwargs,
         )
@@ -319,12 +315,3 @@ def nms_indices(
         idxs = idxs[overlap < iou_threshold]
 
     return keep
-
-
-if __name__ == "__main__":
-    # Runs inference on an image
-    mtcnn = MTCNN.keras_predictors()
-    image_path = Path.cwd().parent.parent.joinpath("tests", "data", "execs.jpg")
-    image = cv2.cvtColor(cv2.imread(str(image_path)), cv2.COLOR_BGR2RGB)
-    result = mtcnn.predict(image)
-    print(result)

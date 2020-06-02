@@ -1,21 +1,29 @@
-#include "trtNet.h"
 #include "commonCuda.h"
 #include "logger.h"
+#include "trtNet.h"
 
 #include <iostream>
 #include <string>
 
-TrtNetInfo::TrtNetInfo(nvinfer1::Dims3 in): inputShape{in} {}
+TrtNetInfo::TrtNetInfo(nvinfer1::Dims3 in, nvinfer1::Dims3 outProb,
+                       nvinfer1::Dims3 outReg)
+    : inputShape{in}, outputProbShape{outProb}, outputRegShape{outReg} {}
+
+TrtNetInfo::TrtNetInfo(nvinfer1::Dims3 in, nvinfer1::Dims3 outProb,
+                       nvinfer1::Dims3 outReg, nvinfer1::Dims3 outLand)
+    : inputShape{in}, outputProbShape{outProb}, outputRegShape{outReg},
+      outputLandmarksShape{outLand} {}
 
 std::map<std::pair<int, int>, TrtNetInfo> TrtNet::TRT_NET_INFO = {
-  {{384, 216}, {{384, 216, 3}}},
+    {{384, 216}, {{384, 216, 3}, {187, 103, 2}, {187, 103, 4}}},
 };
 
-// TODO: fix the shapes here
 TrtNet::TrtNet()
     : inputName{"input_1"}, outputProbName{"softmax/Softmax"},
-      outputRegName{"conv2d_4/BiasAdd"}, inputShape{384, 216, 3},
-      outputProbShape{187, 103, 2}, outputRegShape{187, 103, 4} {}
+      outputRegName{"conv2d_4/BiasAdd"},
+      inputShape{TRT_NET_INFO.at({384, 216}).inputShape},
+      outputProbShape{TRT_NET_INFO.at({384, 216}).outputProbShape},
+      outputRegShape{TRT_NET_INFO.at({384, 216}).outputRegShape} {}
 
 TrtNet::~TrtNet() {
   if (builder != nullptr) {
@@ -29,6 +37,16 @@ TrtNet::~TrtNet() {
   }
 }
 
+nvinfer1::Dims3 TrtNet::getInputShape() {
+  return inputShape;
+};
+nvinfer1::Dims3 TrtNet::getOutputProbShape() {
+  return outputProbShape;
+};
+nvinfer1::Dims3 TrtNet::getOutputRegShape() {
+  return outputRegShape;
+};
+
 /**
  * Can we put more than one graph in a ICudaEngine?
  */
@@ -39,7 +57,8 @@ void TrtNet::start() {
   nvinfer1::INetworkDefinition *network = builder->createNetworkV2(0U);
 
   nvuffparser::IUffParser *parser = nvuffparser::createUffParser();
-  parser->registerInput(inputName.c_str(), inputShape, nvuffparser::UffInputOrder::kNHWC);
+  parser->registerInput(inputName.c_str(), inputShape,
+                        nvuffparser::UffInputOrder::kNHWC);
   parser->registerOutput(outputProbName.c_str());
   parser->registerOutput(outputRegName.c_str());
   parser->parse(uffFile.c_str(), *network, nvinfer1::DataType::kFLOAT);
@@ -59,7 +78,7 @@ void TrtNet::start() {
 /**
  * For now, we assume image is a cpu array
  */
-void TrtNet::predict(float *image, int height, int width, int channels,
+void TrtNet::predict(float *image, int imageSize,
                      float *outputProb, int outputProbSize, float *outputReg,
                      int outputRegSize) {
   // TODO: add check for height, width, channels to match the inputShape
@@ -71,7 +90,7 @@ void TrtNet::predict(float *image, int height, int width, int channels,
   float *dOutputProb;
   float *dOutputReg;
 
-  int imageSize = dimsSize(inputShape);
+  assert(imageSize == dimsSize(inputShape));
   CUDACHECK(cudaMalloc((void **)&dImage, sizeof(float) * imageSize));
   CUDACHECK(cudaMalloc((void **)&dOutputProb,
                        sizeof(float) * dimsSize(outputProbShape)));

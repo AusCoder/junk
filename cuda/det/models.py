@@ -325,20 +325,24 @@ class _KerasMTCNNNet:
     }
 
     def __init__(
-        self, model_path: str, *args, data_format: str = "channels_last", **kwargs
+        self,
+        *,
+        model_path: str,
+        data_format: str = "channels_last",
+        debug_input_output_dir=None,
+        **kwargs,
     ):
         self.data_format = data_format
-        self.model = self._factories[self._net_name](
-            *args, data_format=data_format, **kwargs
-        )
+        self.debug_input_output_dir = debug_input_output_dir
+        self.model = self._factories[self._net_name](data_format=data_format, **kwargs)
         weights_dict = np.load(model_path, allow_pickle=True, encoding="latin1").item()
         weights = self._weight_formatters[self._net_name](weights_dict, data_format)
         self.model.set_weights(weights)
 
     @classmethod
-    def default_model(cls, *args, **kwargs):
-        model_path = _model_paths[cls._net_name]
-        return cls(str(model_path), *args, **kwargs)
+    def default_model(cls, **kwargs):
+        model_path = str(_model_paths[cls._net_name])
+        return cls(model_path=model_path, **kwargs)
 
     def predict(self, image_arr: np.ndarray) -> Any:
         # This transpose (NHWC -> NWHC) is required by the original caffe weights... this is pain
@@ -362,19 +366,43 @@ class _KerasMTCNNNet:
     def freeze_to_uff(self):
         return freeze_tf_keras_model_to_uff(self._net_name, self.model)
 
+    def _save_input_output_if_debug(self, image_arr, out):
+        if self.debug_input_output_dir:
+            self.debug_input_output_dir.mkdir(parents=True, exist_ok=True)
+            self._save(image_arr, "input")
+
+            try:
+                prob, reg = out
+            except ValueError:
+                prob, reg, landmarks = out
+
+            self._save(prob, "output-prob")
+            self._save(reg, "output-reg")
+            try:
+                self._save(landmarks, "output-landmarks")
+            except NameError:
+                pass
+
+    def _save(self, arr, desc):
+        rendered_shape = "-".join(arr.shape)
+        input_path = self.debug_input_output_dir.joinpath(
+            f"{self._net_name}_{rendered_shape}_{desc}.npy"
+        )
+        np.save(input_path, arr)
+
 
 class KerasPNet(_KerasMTCNNNet):
     _net_name = "pnet"
 
     def __init__(
         self,
-        *args,
+        *,
         input_shape: Tuple[Optional[int], Optional[int]] = (None, None),
         **kwargs,
     ) -> None:
         # We swap the channel order because the default weights require this
         h, w = input_shape
-        super().__init__(*args, input_shape=(w, h), **kwargs)
+        super().__init__(input_shape=(w, h), **kwargs)
 
     def predict(self, image_arr: np.ndarray):
         prob, reg = super().predict(image_arr)

@@ -2,6 +2,7 @@ import logging
 from pathlib import Path
 
 import click
+import cv2
 
 from models import KerasPNet, KerasRNet, KerasONet, clear_keras_session
 from network import (
@@ -9,6 +10,7 @@ from network import (
     compute_scales,
     DEFAULT_MIN_SIZE,
     DEFAULT_SCALE_FACTOR,
+    MTCNN,
 )
 
 DEFAULT_HEIGHT = 720
@@ -84,6 +86,19 @@ def save_uff():
 
     for info in frozen_graph_infos:
         click.echo(info)
+
+
+@main.command()
+@main.command(
+    "-o", "--debug-input-output-dir", help="Directory to write debug net input output"
+)
+def run(debug_input_output_dir):
+    mtcnn = MTCNN.keras_predictors(debug_input_output_dir=debug_input_output_dir)
+    image_path = Path.cwd().parent.parent.joinpath("tests", "data", "execs.jpg")
+    assert image_path.exists()
+    image = cv2.cvtColor(cv2.imread(str(image_path)), cv2.COLOR_BGR2RGB)
+    result = mtcnn.predict(image)
+    click.echo(result)
 
 
 if __name__ == "__main__":
