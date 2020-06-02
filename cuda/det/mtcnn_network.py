@@ -59,36 +59,23 @@ class MTCNN:
         return boxes, landmarks
 
     @staticmethod
-    def keras_predictors(data_format: str = "channels_last", **kwargs):
-        from models import KerasPNet, KerasRNet, KerasONet
+    def keras_predictors(
+        data_format: str = "channels_last",
+        debug_input_output_dir: Optional[Path] = None,
+        **kwargs,
+    ):
+        from mtcnn_base import KerasPNet, KerasRNet, KerasONet
 
         return MTCNN(
-            KerasPNet.default_model(data_format=data_format),
-            KerasRNet.default_model(data_format=data_format),
-            KerasONet.default_model(data_format=data_format),
-            **kwargs,
-        )
-
-    @staticmethod
-    def tf_predictors(**kwargs):
-        from models import TFPNet, TFRNet, TFONet
-
-        return MTCNN(
-            TFPNet.default_model().start(),
-            TFRNet.default_model().start(),
-            TFONet.default_model().start(),
-            **kwargs,
-        )
-
-    @staticmethod
-    def trt_predictors(image_size: Optional[Tuple[int, int]] = (720, 1280), **kwargs):
-        from models import TRTPNet, TRTRNet, TRTONet
-
-        return MTCNN(
-            TRTPNet.default_model().start(),
-            TRTRNet.default_model().start(),
-            TRTONet.default_model().start(),
-            image_size=image_size,
+            KerasPNet.default_model(
+                data_format=data_format, debug_input_output_dir=debug_input_output_dir
+            ),
+            KerasRNet.default_model(
+                data_format=data_format, debug_input_output_dir=debug_input_output_dir
+            ),
+            KerasONet.default_model(
+                data_format=data_format, debug_input_output_dir=debug_input_output_dir
+            ),
             **kwargs,
         )
 

@@ -68,8 +68,10 @@ RUN \
   && python -m pip install --upgrade pip \
   && python -m pip install \
     opencv-python \
-    tensorflow==1.14.0
+    tensorflow==1.14.0 \
+    click
 
+ENV LC_ALL=C.UTF-8
 ENV OPENCV_LIB_DIR=/opt/opencv/install/lib
 ENV OPENCV_INCLUDE_DIR=/opt/opencv/install/include/opencv4
 ENV PKG_CONFIG_PATH=/opt/opencv/install/lib/pkgconfig:$PKG_CONFIG_PATH

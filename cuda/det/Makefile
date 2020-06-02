@@ -3,7 +3,7 @@ CPPFLAGS = -I$(CUDA_INSTALL_DIR)/include $(shell pkg-config --cflags opencv4) -I
 LDFLAGS = -L$(CUDA_INSTALL_DIR)/lib64 -L./lib
 LDLIBS = $(shell pkg-config --libs opencv4) -lnvinfer -lnvinfer_plugin -lnvparsers  -lcudart # -lcnpy
 NVCC = $(CUDA_INSTALL_DIR)/bin/nvcc
-NVFLAGS = -g -Xcompiler -Wall -Xcompiler -std=c++14
+NVFLAGS = -g -G -Xcompiler -Wall -Xcompiler -std=c++14
 
 mainMtcnn: mainMtcnn.o mtcnn.o trtNet.o logger.o
 	$(CXX) $^ -o $@ $(LDFLAGS) $(LDLIBS)
@@ -28,6 +28,9 @@ loadNumpy: loadNumpy.o
 
 loggerSample: loggerSample.o logger.o
 	$(CXX) $^ -o $@ $(LDFLAGS) $(LDLIBS)
+
+trtNetMain: trtNetMain.o trtNet.obj commonCuda.obj logger.o
+	$(CXX) $^ -o $@ $(LDFLAGS) $(LDLIBS) -lcnpy
 
 test_common: test_common.o common.o
 	$(CXX) $^ -o $@ $(LDFLAGS) -lopencv_core -lopencv_imgcodecs

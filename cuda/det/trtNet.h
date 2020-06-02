@@ -10,6 +10,7 @@ and Contexts etc.
 
 #include "NvInfer.h"
 #include "NvUffParser.h"
+#include "cuda_runtime.h"
 #include "logger.h"
 
 #include <map>
@@ -42,7 +43,8 @@ public:
   void start();
 
   void predict(float *image, int imageSize, float *outputProb,
-               int outputProbSize, float *outputReg, int outputRegSize);
+               int outputProbSize, float *outputReg, int outputRegSize,
+               cudaStream_t *stream);
 
   nvinfer1::Dims3 getInputShape();
   nvinfer1::Dims3 getOutputProbShape();

@@ -5,6 +5,8 @@
 using Severity = nvinfer1::ILogger::Severity;
 
 void Logger::log(Severity severity, const char *msg) {
+  // if (severity == Severity::kVERBOSE)
+  //   return;
   std::cout << renderSeverity(severity) << msg << std::endl;
 };
 

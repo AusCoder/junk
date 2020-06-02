@@ -1,5 +1,7 @@
 import logging
-from collections import namedtuple
+import functools
+import operator
+from collections import namedtuple, OrderedDict
 from pathlib import Path
 from typing import Dict, Any, List, Tuple, Optional
 
@@ -7,6 +9,9 @@ import uff
 import numpy as np
 from tensorflow.keras import backend as K_tf, layers, Model
 import tensorflow as tf
+import tensorrt as trt
+import pycuda.autoinit
+import pycuda.driver as cuda
 
 logger = logging.getLogger(__name__)
 
@@ -226,11 +231,11 @@ def create_onet(data_format: str):
 def format_pnet_weights(weight_dict: Dict[str, Any], data_format: str):
     layer_order = [
         ("conv1", None),
-        ("PReLU1", _conv_prelue_reshape(data_format)),
+        ("PReLU1", prelue_weights_reshape(data_format)),
         ("conv2", None),
-        ("PReLU2", _conv_prelue_reshape(data_format)),
+        ("PReLU2", prelue_weights_reshape(data_format)),
         ("conv3", None),
-        ("PReLU3", _conv_prelue_reshape(data_format)),
+        ("PReLU3", prelue_weights_reshape(data_format)),
         ("conv4-1", None),
         ("conv4-2", None),
     ]
@@ -240,11 +245,11 @@ def format_pnet_weights(weight_dict: Dict[str, Any], data_format: str):
 def format_rnet_weights(weight_dict: Dict[str, Any], data_format: str):
     layer_order = [
         ("conv1", None),
-        ("prelu1", _conv_prelue_reshape(data_format)),
+        ("prelu1", prelue_weights_reshape(data_format)),
         ("conv2", None),
-        ("prelu2", _conv_prelue_reshape(data_format)),
+        ("prelu2", prelue_weights_reshape(data_format)),
         ("conv3", None),
-        ("prelu3", _conv_prelue_reshape(data_format)),
+        ("prelu3", prelue_weights_reshape(data_format)),
         ("conv4", None),
         ("prelu4", None),
         ("conv5-1", None),
@@ -256,13 +261,13 @@ def format_rnet_weights(weight_dict: Dict[str, Any], data_format: str):
 def format_onet_weights(weight_dict: Dict[str, Any], data_format: str):
     layer_order = [
         ("conv1", None),
-        ("prelu1", _conv_prelue_reshape(data_format)),
+        ("prelu1", prelue_weights_reshape(data_format)),
         ("conv2", None),
-        ("prelu2", _conv_prelue_reshape(data_format)),
+        ("prelu2", prelue_weights_reshape(data_format)),
         ("conv3", None),
-        ("prelu3", _conv_prelue_reshape(data_format)),
+        ("prelu3", prelue_weights_reshape(data_format)),
         ("conv4", None),
-        ("prelu4", _conv_prelue_reshape(data_format)),
+        ("prelu4", prelue_weights_reshape(data_format)),
         ("conv5", None),
         ("prelu5", None),
         ("conv6-1", None),
@@ -290,7 +295,7 @@ def _gen_mtcnn_net_weights(
             raise ValueError
 
 
-def _conv_prelue_reshape(data_format: str):
+def prelue_weights_reshape(data_format: str):
     if data_format == "channels_first":
 
         def reshape(x):
@@ -349,7 +354,9 @@ class _KerasMTCNNNet:
         image_arr = np.transpose(image_arr, (0, 2, 1, 3))
         if self.data_format == "channels_first":
             image_arr = image_arr.transpose((0, 3, 1, 2))
+        print(f"first values for image: {image_arr.reshape(-1)[:10]}")
         out = self.model.predict(image_arr)
+        self._save_input_output_if_debug(image_arr, out)
         if self.data_format == "channels_first":
             out = [x.transpose((0, 2, 3, 1)) if x.ndim == 4 else x for x in out]
         return out
@@ -384,7 +391,7 @@ class _KerasMTCNNNet:
                 pass
 
     def _save(self, arr, desc):
-        rendered_shape = "-".join(arr.shape)
+        rendered_shape = "-".join(f"{x:d}" for x in arr.shape)
         input_path = self.debug_input_output_dir.joinpath(
             f"{self._net_name}_{rendered_shape}_{desc}.npy"
         )
@@ -417,6 +424,173 @@ class KerasRNet(_KerasMTCNNNet):
 
 class KerasONet(_KerasMTCNNNet):
     _net_name = "onet"
+
+
+class TRTNet:
+    LOGGER = trt.Logger(trt.Logger.VERBOSE)
+
+    PREDEFINED_NET_SHAPES = {
+        "conv_216x384": {
+            "inputs": [("input_1", (384, 216, 3), trt.UffInputOrder.NHWC)],
+            "outputs": ["conv2d/BiasAdd"],
+        },
+        "debug_net": {
+            "inputs": [("input_1", (384, 216, 3), trt.UffInputOrder.NHWC)],
+            "outputs": ["softmax/Softmax", "conv2d_4/BiasAdd"],
+        }
+        # "pnet_216x384": {
+        #     "inputs": [("images", (160, 160, 3), trt.UffInputOrder.NHWC)],
+        #     "outputs": ["preembeddings"],
+        # }
+    }
+
+    def __init__(
+        self,
+        engine: trt.ICudaEngine,
+        input_names: List[str],
+        output_names: List[str],
+        batch_size: int = 1,
+    ):
+        self.input_names = input_names
+        self.output_names = output_names
+        # TODO: provide a way to limit to max_batch_size from the cuda engine
+        self.batch_size = batch_size
+
+        self.engine = engine
+        self.context = None
+        self.stream = None
+        self.h_inputs = None
+        self.h_outputs = None
+        self.d_inputs = None
+        self.d_outputs = None
+        self._names_with_idxs = None
+
+    @staticmethod
+    def create_from_uff_file(
+        model_path: str, inputs: List[Tuple[str, Any, Any]], output_names: List[str]
+    ):
+        builder = trt.Builder(TRTNet.LOGGER)
+        parser, network = TRTNet.build_parser_and_network(builder, inputs, output_names)
+        parser.parse(model_path, network)
+        engine = builder.build_cuda_engine(network)
+        input_names = [n for n, _, _ in inputs]
+        return TRTNet(engine=engine, input_names=input_names, output_names=output_names)
+
+    @staticmethod
+    def build_parser_and_network(
+        builder, inputs: List[Tuple[str, Any, Any]], output_names: List[str]
+    ):
+        builder.max_batch_size = 16
+        # This determines the amount of memory available to the builder when building an optimized engine and should generally be set as high as possible.
+        builder.max_workspace_size = 1 << 30
+
+        network = builder.create_network()
+        parser = trt.UffParser()
+        for name, shape, order in inputs:
+            if order is not None:
+                parser.register_input(name=name, shape=shape, order=order)
+            else:
+                parser.register_input(name=name, shape=shape)
+        for name in output_names:
+            parser.register_output(name=name)
+        return parser, network
+
+    @staticmethod
+    def create_from_predefined_net_shapes(model_path: str, net_name: str):
+        net_shape = TRTNet.PREDEFINED_NET_SHAPES[net_name]
+        return TRTNet.create_from_uff_file(
+            model_path, net_shape["inputs"], net_shape["outputs"]
+        )
+
+    def start(self):
+        self.context = self.engine.create_execution_context()
+
+        self._names_with_idxs = self._get_tensor_names()
+        self.h_inputs = self._allocate_host(self.input_names, self._names_with_idxs)
+        self.h_outputs = self._allocate_host(self.output_names, self._names_with_idxs)
+        self.d_inputs = self._allocate_device(self.h_inputs)
+        self.d_outputs = self._allocate_device(self.h_outputs)
+
+        # Determine dimensions and create page-locked memory buffers (i.e. won't be swapped to disk) to hold host inputs/outputs.
+
+        # out_volume = _prod(int(d) for d in self.engine.get_binding_shape(1))
+
+        # self.h_input = cuda.pagelocked_empty(in_volume, dtype=np.float32)
+        # self.h_output = cuda.pagelocked_empty(out_volume, dtype=np.float32)
+        # Allocate device memory for inputs and outputs.
+        # self.d_input = cuda.mem_alloc(self.h_input.nbytes)
+        # self.d_output = cuda.mem_alloc(self.h_output.nbytes)
+        # Create a stream in which to copy inputs/outputs and run inference.
+        self.stream = cuda.Stream()
+        return self
+
+    def _get_tensor_names(self):
+        cur_idx = 0
+        names_with_idxs = OrderedDict()
+        while True:
+            # TODO: check for the number of binds here to avoid an error log
+            name = self.engine.get_binding_name(cur_idx)
+            if not name:
+                break
+            names_with_idxs[name] = cur_idx
+            cur_idx += 1
+        return names_with_idxs
+
+    def _allocate_host(self, names, names_with_idxs):
+        host_allocations = {}
+        for name in names:
+            idx = names_with_idxs[name]
+            volume = functools.reduce(
+                operator.mul, (int(d) for d in self.engine.get_binding_shape(idx))
+            )
+            volume *= self.batch_size
+            host_allocations[name] = cuda.pagelocked_empty(volume, dtype=np.float32)
+        return host_allocations
+
+    def _allocate_device(self, host_allocations):
+        return {k: cuda.mem_alloc(v.nbytes) for k, v in host_allocations.items()}
+
+    def predict(self, image_arr: np.ndarray):
+        """Simplest predict that expects inputs to have length 1.
+
+        Also performs no validation of input shape.
+        """
+        (inpt,) = self.h_inputs.values()
+        inpt[...] = image_arr.reshape(-1)
+        return self._run()
+
+    def _run(self):
+        # Transfer input data to the GPU.
+        for name in self.h_inputs:
+            cuda.memcpy_htod_async(
+                self.d_inputs[name], self.h_inputs[name], self.stream
+            )
+        # Run inference.
+        # bindings = [self.d_inputs[n] for n in self.input_names] + [
+        #     self.d_outputs[n] for n in self.output_names
+        # ]
+        bindings = []
+        for name in self._names_with_idxs:
+            if name in self.d_inputs:
+                h = self.d_inputs[name]
+            else:
+                h = self.d_outputs[name]
+            bindings.append(int(h))
+        # bindings = [int(x) for x in bindings]
+        self.context.execute_async(
+            bindings=bindings,
+            batch_size=self.batch_size,
+            stream_handle=self.stream.handle,
+        )
+        # Transfer predictions back from the GPU.
+        for name in self.h_outputs:
+            cuda.memcpy_dtoh_async(
+                self.h_outputs[name], self.d_outputs[name], self.stream
+            )
+        # Synchronize the stream
+        self.stream.synchronize()
+        outputs = [self.h_outputs[n] for n in self.output_names]
+        return outputs
 
 
 if __name__ == "__main__":
