@@ -5,7 +5,7 @@ LDLIBS = $(shell pkg-config --libs opencv4) -lnvinfer -lnvinfer_plugin -lnvparse
 NVCC = $(CUDA_INSTALL_DIR)/bin/nvcc
 NVFLAGS = -g -G -Xcompiler -Wall -Xcompiler -std=c++14
 
-mainMtcnn: mainMtcnn.o mtcnn.o trtNet.o logger.o
+mainMtcnn: mainMtcnn.o mtcnn.o trtNet.obj commonCuda.obj logger.o
 	$(CXX) $^ -o $@ $(LDFLAGS) $(LDLIBS)
 
 nmsCpu: nmsCpu.o
@@ -47,4 +47,4 @@ test_trtNet: test_trtNet.o trtNet.obj commonCuda.obj logger.o
 clean:
 	$(RM) *.o *.obj main nmsGpu nmsCpu generateBoxes \
 		cropResize cropResizeCpu loadNumpy mainMtcnn loggerSample test_common \
-		test_trtNet
+		test_trtNet trtNetMain

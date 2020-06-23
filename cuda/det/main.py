@@ -18,6 +18,13 @@ DEFAULT_HEIGHT = 720
 DEFAULT_WIDTH = 1280
 
 
+def _read_rgb_image():
+    image_path = Path.cwd().parent.parent.joinpath("tests", "data", "execs.jpg")
+    assert image_path.exists()
+    image = cv2.cvtColor(cv2.imread(str(image_path)), cv2.COLOR_BGR2RGB)
+    return image
+
+
 def _setup_logging():
     logging.basicConfig()
     for name in [__name__, "models", "network"]:
@@ -94,15 +101,14 @@ def save_uff():
     "-o", "--debug-input-output-dir", help="Directory to write debug net input output"
 )
 def run_keras(debug_input_output_dir):
-    debug_input_output_dir = Path(debug_input_output_dir)
+    if debug_input_output_dir:
+        debug_input_output_dir = Path(debug_input_output_dir)
     DEFAULT_IMAGE_SIZE = (720, 1280)
 
     mtcnn = MTCNN.keras_predictors(
         debug_input_output_dir=debug_input_output_dir, image_size=DEFAULT_IMAGE_SIZE
     )
-    image_path = Path.cwd().parent.parent.joinpath("tests", "data", "execs.jpg")
-    assert image_path.exists()
-    image = cv2.cvtColor(cv2.imread(str(image_path)), cv2.COLOR_BGR2RGB)
+    image = _read_rgb_image()
     result = mtcnn.predict(image)
     click.echo(result)
 
@@ -159,5 +165,26 @@ def _verify_keras_and_trt_models(keras_model, trt_model):
     click.echo("Keras TRT output verified")
 
 
+@main.command()
+def debug_transposed_weights():
+    from mtcnn_base import KerasPNet
+
+    image = _read_rgb_image()
+    image = cv2.resize(image, (216, 384))
+    image = image.astype(np.float32)
+    image = image.reshape((1, *image.shape))
+    image = (image - 127.5) / 128.0
+    pnet = KerasPNet.default_model()
+    prob, reg = pnet.predict(image)
+    print(f"Prob shape: {prob.shape}. First 10: {prob.reshape(-1)[:10]}")
+    print(f"Reg shape: {reg.shape}. First 10: {reg.reshape(-1)[:10]}")
+
+
 if __name__ == "__main__":
     main()
+
+
+# Output shape: (1, 187, 103, 2). First 10: [ 3.984418 -4.990023  3.984418 -4.990023  3.984418 -4.990023  3.984418
+#  -4.990023  3.984418 -4.990023]
+# Output shape: (1, 187, 103, 4). First 10: [-0.02140094 -0.15377651  0.03942679  0.14396223 -0.02140094 -0.15377651
+#   0.03942679  0.14396223 -0.02140094 -0.15377651]

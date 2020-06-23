@@ -1,3 +1,4 @@
+#include "NvUffParser.h"
 #include "commonCuda.h"
 #include "logger.h"
 #include "trtNet.h"
@@ -6,57 +7,75 @@
 #include <iostream>
 #include <string>
 
-TrtNetInfo::TrtNetInfo(nvinfer1::Dims3 in, nvinfer1::Dims3 outProb,
-                       nvinfer1::Dims3 outReg)
-    : inputShape{in}, outputProbShape{outProb}, outputRegShape{outReg} {}
+TensorInfo::TensorInfo(std::string n, nvinfer1::Dims3 s, InputOrder i):
+  name{n}, shape{s}, inputOrder{i} {}
 
-TrtNetInfo::TrtNetInfo(nvinfer1::Dims3 in, nvinfer1::Dims3 outProb,
-                       nvinfer1::Dims3 outReg, nvinfer1::Dims3 outLand)
-    : inputShape{in}, outputProbShape{outProb}, outputRegShape{outReg},
-      outputLandmarksShape{outLand} {}
+TensorInfo::TensorInfo(std::string n, nvinfer1::Dims3 s):
+  name{n}, shape{s}, inputOrder{InputOrder::None} {}
 
-std::map<std::pair<int, int>, TrtNetInfo> TrtNet::TRT_NET_INFO = {
-    {{384, 216}, {{384, 216, 3}, {187, 103, 2}, {187, 103, 4}}},
-};
+TrtNet::TrtNet(const std::string &p, const TrtNetInfo &i): modelPath{p}, netInfo{i} {}
 
-TrtNet::TrtNet()
-    : inputName{"input_1"}, outputProbName{"conv2d_3/BiasAdd"},
-      outputRegName{"conv2d_4/BiasAdd"},
-      inputShape{TRT_NET_INFO.at({384, 216}).inputShape},
-      outputProbShape{TRT_NET_INFO.at({384, 216}).outputProbShape},
-      outputRegShape{TRT_NET_INFO.at({384, 216}).outputRegShape} {}
+TrtNet::TrtNet(TrtNet &&net): builder{net.builder}, engine{net.engine}, context{net.context}, modelPath{net.modelPath}, netInfo{net.netInfo} {
+  net.builder = nullptr;
+  net.engine = nullptr;
+  net.context = nullptr;
+  net.modelPath = "";
+  net.netInfo = {};
+}
 
 TrtNet::~TrtNet() {
-  if (builder != nullptr) {
-    builder->destroy();
+  if (context != nullptr) {
+    context->destroy();
   }
   if (engine != nullptr) {
     engine->destroy();
   }
-  if (context != nullptr) {
-    context->destroy();
+  if (builder != nullptr) {
+    builder->destroy();
   }
 }
 
-nvinfer1::Dims3 TrtNet::getInputShape() { return inputShape; };
-nvinfer1::Dims3 TrtNet::getOutputProbShape() { return outputProbShape; };
-nvinfer1::Dims3 TrtNet::getOutputRegShape() { return outputRegShape; };
+// nvinfer1::Dims3 TrtNet::getInputShape() { return inputShape; };
+// nvinfer1::Dims3 TrtNet::getOutputProbShape() { return outputProbShape; };
+// nvinfer1::Dims3 TrtNet::getOutputRegShape() { return outputRegShape; };
+const TensorInfo &TrtNet::getInputTensorInfo(int i) {
+  return netInfo.inputTensorInfos.at(i);
+}
+
+const TensorInfo &TrtNet::getOutputTensorInfo(int i) {
+  return netInfo.outputTensorInfos.at(i);
+}
 
 /**
  * Can we put more than one graph in a ICudaEngine?
  */
 void TrtNet::start() {
-  std::string uffFile = "data/debug_uff/debug_net.uff";
-
   builder = nvinfer1::createInferBuilder(gLogger);
   nvinfer1::INetworkDefinition *network = builder->createNetworkV2(0U);
 
   nvuffparser::IUffParser *parser = nvuffparser::createUffParser();
-  parser->registerInput(inputName.c_str(), inputShape,
-                        nvuffparser::UffInputOrder::kNHWC);
-  parser->registerOutput(outputProbName.c_str());
-  parser->registerOutput(outputRegName.c_str());
-  parser->parse(uffFile.c_str(), *network, nvinfer1::DataType::kFLOAT);
+
+  for (auto &tensorInfo : netInfo.inputTensorInfos) {
+    nvuffparser::UffInputOrder order;
+    if (tensorInfo.inputOrder == InputOrder::NHWC) {
+      order = nvuffparser::UffInputOrder::kNHWC;
+    }
+    // TODO: throw here
+    // else {
+      // throw std::
+    // }
+    parser->registerInput(tensorInfo.name.c_str(), tensorInfo.shape,
+                        order);
+  }
+  for (auto &tensorInfo : netInfo.outputTensorInfos) {
+    parser->registerOutput(tensorInfo.name.c_str());
+  }
+  // parser->registerInput(inputName.c_str(), inputShape,
+  //                       nvuffparser::UffInputOrder::kNHWC);
+  // parser->registerOutput(outputProbName.c_str());
+  // parser->registerOutput(outputRegName.c_str());
+
+  parser->parse(modelPath.c_str(), *network, nvinfer1::DataType::kFLOAT);
 
   builder->setMaxBatchSize(1);
   nvinfer1::IBuilderConfig *config = builder->createBuilderConfig();
@@ -70,41 +89,40 @@ void TrtNet::start() {
   parser->destroy();
 }
 
-/**
- * For now, we assume image is a cpu array
- */
-void TrtNet::predict(float *image, int imageSize, float *outputProb,
-                     int outputProbSize, float *outputReg, int outputRegSize,
-                     cudaStream_t *stream) {
+// void TrtNet::predict(const std::vector<float *> inputs)
 
-  // TODO: add check for height, width, channels to match the inputShape
-  int inputIndex = engine->getBindingIndex(inputName.c_str());
-  int outputIndexProb = engine->getBindingIndex(outputProbName.c_str());
-  int outputIndexReg = engine->getBindingIndex(outputRegName.c_str());
+void TrtNet::predictFromHost(const std::vector<float *> &inputs, const std::vector<float *> &outputs,
+  cudaStream_t *stream) {
+  int numBuffers = netInfo.inputTensorInfos.size() + netInfo.outputTensorInfos.size();
+  void *buffers[numBuffers];
 
-  std::cout << "Binding indices: " << inputIndex << " " << outputIndexProb
-            << std::endl;
+  for (int i = 0; i < inputs.size(); i++) {
+    const TensorInfo &tensorInfo = netInfo.inputTensorInfos.at(i);
+    int bindingIndex = engine->getBindingIndex(
+      tensorInfo.name.c_str()
+    );
+    int inputSize = dimsSize(tensorInfo.shape);
+    float *input = inputs.at(i);
+    float *dInput;
+    CUDACHECK(cudaMalloc((void **)&dInput, sizeof(float) * inputSize));
 
-  float *dImage;
-  float *dOutputProb;
-  float *dOutputReg;
-
-  assert(imageSize == dimsSize(inputShape));
-  assert(outputProbSize == dimsSize(outputProbShape));
-  assert(outputRegSize == dimsSize(outputRegShape));
-
-  CUDACHECK(cudaMalloc((void **)&dImage, sizeof(float) * imageSize));
-  CUDACHECK(cudaMalloc((void **)&dOutputProb, sizeof(float) * outputProbSize));
-  CUDACHECK(cudaMalloc((void **)&dOutputReg, sizeof(float) * outputRegSize));
-
-  CUDACHECK(cudaMemcpyAsync((void *)dImage, (void *)image,
-                            sizeof(float) * imageSize, cudaMemcpyHostToDevice,
+    CUDACHECK(cudaMemcpyAsync((void *)dInput, (void *)input,
+                            sizeof(float) * inputSize, cudaMemcpyHostToDevice,
                             *stream));
+    buffers[bindingIndex] = dInput;
+  }
 
-  void *buffers[3];
-  buffers[inputIndex] = dImage;
-  buffers[outputIndexProb] = dOutputProb;
-  buffers[outputIndexReg] = dOutputReg;
+  for (int i = 0; i < outputs.size(); i++) {
+    const TensorInfo &tensorInfo = netInfo.outputTensorInfos.at(i);
+    int bindingIndex = engine->getBindingIndex(
+      tensorInfo.name.c_str()
+    );
+    int outputSize = dimsSize(tensorInfo.shape);
+    float *output = outputs.at(i);
+    float *dOutput;
+    CUDACHECK(cudaMalloc((void **)&dOutput, sizeof(float) * outputSize));
+    buffers[bindingIndex] = dOutput;
+  }
 
   if (!context->enqueue(1, buffers, *stream, nullptr)) {
     std::cout << "Execute failed" << std::endl;
@@ -112,12 +130,30 @@ void TrtNet::predict(float *image, int imageSize, float *outputProb,
     std::cout << "Execute success" << std::endl;
   }
 
-  CUDACHECK(cudaMemcpyAsync((void *)outputProb, (void *)dOutputProb,
-                            sizeof(float) * outputProbSize,
+  for (int i = 0; i < outputs.size(); i++) {
+    const TensorInfo &tensorInfo = netInfo.outputTensorInfos.at(i);
+    int bindingIndex = engine->getBindingIndex(
+      tensorInfo.name.c_str()
+    );
+    int outputSize = dimsSize(tensorInfo.shape);
+    float *output = outputs.at(i);
+    CUDACHECK(cudaMemcpyAsync((void *)output, buffers[bindingIndex],
+                            sizeof(float) * outputSize,
                             cudaMemcpyDeviceToHost, *stream));
-  CUDACHECK(cudaMemcpyAsync((void *)outputReg, (void *)dOutputReg,
-                            sizeof(float) * outputRegSize,
-                            cudaMemcpyDeviceToHost, *stream));
+  }
 
   CUDACHECK(cudaStreamSynchronize(*stream));
+
+  for (int i = 0; i < numBuffers; i++) {
+    CUDACHECK(cudaFree(buffers[i]));
+  }
+}
+
+TrtNetInfo TrtNet::createPnetInfo() {
+  TrtNetInfo pnetInfo{};
+  pnetInfo.inputTensorInfos.push_back(
+      {"input_1", {384, 216, 3}, InputOrder::NHWC});
+  pnetInfo.outputTensorInfos.push_back({"conv2d_3/BiasAdd", {187, 103, 2}});
+  pnetInfo.outputTensorInfos.push_back({"conv2d_4/BiasAdd", {187, 103, 4}});
+  return pnetInfo;
 }

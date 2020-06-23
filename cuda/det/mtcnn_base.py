@@ -286,6 +286,9 @@ def _gen_mtcnn_net_weights(
         if reshape_fn is None:
             reshape_fn = lambda x: x
         if layer_name.startswith("conv"):
+            # transposed_weights = np.transpose(
+            #     weight_dict[layer_name]["weights"], (1, 0, 2, 3)
+            # )
             yield reshape_fn(weight_dict[layer_name]["weights"])
             yield reshape_fn(weight_dict[layer_name]["biases"])
         elif layer_name.lower().startswith("prelu"):
@@ -353,11 +356,13 @@ class _KerasMTCNNNet:
         # This transpose (NHWC -> NWHC) is required by the original caffe weights... this is pain
         image_arr = np.transpose(image_arr, (0, 2, 1, 3))
         if self.data_format == "channels_first":
+            assert False
             image_arr = image_arr.transpose((0, 3, 1, 2))
         print(f"first values for image: {image_arr.reshape(-1)[:10]}")
         out = self.model.predict(image_arr)
         self._save_input_output_if_debug(image_arr, out)
         if self.data_format == "channels_first":
+            assert False
             out = [x.transpose((0, 2, 3, 1)) if x.ndim == 4 else x for x in out]
         return out
 
@@ -421,9 +426,21 @@ class KerasPNet(_KerasMTCNNNet):
 class KerasRNet(_KerasMTCNNNet):
     _net_name = "rnet"
 
+    # def predict(self, image_arr: np.ndarray) -> Any:
+    #     prob, reg = super().predict(image_arr)
+    #     prob = np.transpose(prob, (0, 2, 1, 3))
+    #     reg = np.transpose(reg, (0, 2, 1, 3))
+    #     return prob, reg
+
 
 class KerasONet(_KerasMTCNNNet):
     _net_name = "onet"
+
+    # def predict(self, image_arr: np.ndarray) -> Any:
+    #     prob, reg, landmarks = super().predict(image_arr)
+    #     prob = np.transpose(prob, (0, 2, 1, 3))
+    #     reg = np.transpose(reg, (0, 2, 1, 3))
+    #     return prob, reg, landmarks
 
 
 class TRTNet:
