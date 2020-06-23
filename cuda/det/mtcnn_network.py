@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 import cv2
+import scipy.special
 import numpy as np
 
 
@@ -97,10 +98,9 @@ def stage_one(pnet, image, min_size, factor, threshold):
             image, (width_scaled, height_scaled), interpolation=cv2.INTER_AREA
         )
 
-        # These transposes should live at the network level
-        # Some of these can be optimized for tensorrt because it doesn't need an image
         resized_image = resized_image.reshape((1, *resized_image.shape))
         prob, reg = pnet(resized_image)
+        prob = scipy.special.softmax(prob, axis=-1)
 
         (prob,) = prob
         (reg,) = reg

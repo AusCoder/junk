@@ -89,21 +89,26 @@ def freeze_tf_keras_model_to_uff(name, model):
     return frozen_graph_with_info, uff_graph_def
 
 
-def create_pnet(data_format: str, input_shape: Tuple[Optional[int], Optional[int]]):
+def create_pnet(
+    data_format: str, input_shape: Tuple[Optional[int], Optional[int]] = (None, None)
+):
     if data_format == "channels_first":
+        raise NotImplementedError("weight transpose might not work with channels_first")
         inpt = layers.Input(shape=(3, *input_shape), dtype="float32")
         prelu_shared_axes = [2, 3]
         softmax_axis = 1
+        x = inpt
     elif data_format == "channels_last":
         inpt = layers.Input(shape=(*input_shape, 3), dtype="float32")
         prelu_shared_axes = [1, 2]
         softmax_axis = 3
+        x = layers.Permute((2, 1, 3))(inpt)
     else:
         raise ValueError
     # conv1
     x = layers.Conv2D(
         filters=10, kernel_size=3, strides=1, padding="VALID", data_format=data_format
-    )(inpt)
+    )(x)
     x = layers.PReLU(shared_axes=prelu_shared_axes)(x)
     x = layers.MaxPooling2D(
         pool_size=2, strides=2, padding="SAME", data_format=data_format
@@ -119,34 +124,39 @@ def create_pnet(data_format: str, input_shape: Tuple[Optional[int], Optional[int
     )(x)
     prelu3_out = layers.PReLU(shared_axes=prelu_shared_axes)(x)
     # conv4-1
-    preprob = layers.Conv2D(
+    x = layers.Conv2D(
         filters=2, kernel_size=1, strides=1, padding="SAME", data_format=data_format
     )(prelu3_out)
+    preprob = layers.Permute((2, 1, 3))(x)
     # UFF has issues with this Softmax. Try:
     # - flatten first
     # - try our own softmax fn
-    prob = layers.Softmax(axis=softmax_axis)(preprob)
+    # prob = layers.Softmax(axis=softmax_axis)(preprob)
     # conv4-2
-    reg = layers.Conv2D(
+    x = layers.Conv2D(
         filters=4, kernel_size=1, strides=1, padding="SAME", data_format=data_format
     )(prelu3_out)
+    reg = layers.Permute((2, 1, 3))(x)
     # model
-    return Model(inputs=inpt, outputs=[prob, reg])
+    return Model(inputs=inpt, outputs=[preprob, reg])
 
 
 def create_rnet(data_format: str):
     if data_format == "channels_first":
+        raise NotImplementedError("weight transpose might not work with channels_first")
         inpt = layers.Input(shape=(3, 24, 24), dtype="float32")
         prelu_shared_axes = [2, 3]
+        x = inpt
     elif data_format == "channels_last":
         inpt = layers.Input(shape=(24, 24, 3), dtype="float32")
         prelu_shared_axes = [1, 2]
+        x = layers.Permute((2, 1, 3))(inpt)
     else:
         raise ValueError
     # conv1
     x = layers.Conv2D(
         filters=28, kernel_size=3, strides=1, padding="VALID", data_format=data_format
-    )(inpt)
+    )(x)
     x = layers.PReLU(shared_axes=prelu_shared_axes)(x)
     x = layers.MaxPooling2D(
         pool_size=3, strides=2, padding="SAME", data_format=data_format
@@ -164,6 +174,10 @@ def create_rnet(data_format: str):
         filters=64, kernel_size=2, strides=1, padding="VALID", data_format=data_format
     )(x)
     x = layers.PReLU(shared_axes=prelu_shared_axes)(x)
+
+    # When transposing the weights, we need a layer like this:
+    # x = layers.Permute((2, 1, 3))(x)
+
     # conv4
     x = layers.Flatten(data_format=data_format)(x)
     x = layers.Dense(units=128)(x)
@@ -178,17 +192,20 @@ def create_rnet(data_format: str):
 
 def create_onet(data_format: str):
     if data_format == "channels_first":
+        raise NotImplementedError("weight transpose might not work with channels_first")
         inpt = layers.Input(shape=(3, 48, 48), dtype="float32")
         prelu_shared_axes = [2, 3]
+        x = inpt
     elif data_format == "channels_last":
         inpt = layers.Input(shape=(48, 48, 3), dtype="float32")
         prelu_shared_axes = [1, 2]
+        x = layers.Permute((2, 1, 3))(inpt)
     else:
         raise ValueError
     # conv1
     x = layers.Conv2D(
         filters=32, kernel_size=3, strides=1, padding="VALID", data_format=data_format
-    )(inpt)
+    )(x)
     x = layers.PReLU(shared_axes=prelu_shared_axes)(x)
     x = layers.MaxPooling2D(
         pool_size=3, strides=2, padding="SAME", data_format=data_format
@@ -214,6 +231,10 @@ def create_onet(data_format: str):
         filters=128, kernel_size=2, strides=1, padding="VALID", data_format=data_format
     )(x)
     x = layers.PReLU(shared_axes=prelu_shared_axes)(x)
+
+    # When transposing the weights, we need a layer like this:
+    # x = layers.Permute((2, 1, 3))(x)
+
     # conv5
     x = layers.Flatten(data_format=data_format)(x)
     x = layers.Dense(units=256)(x)
@@ -278,7 +299,9 @@ def format_onet_weights(weight_dict: Dict[str, Any], data_format: str):
 
 
 def _gen_mtcnn_net_weights(
-    weight_dict: Dict[str, Any], layers_with_reshape_fn: List[str]
+    weight_dict: Dict[str, Any],
+    layers_with_reshape_fn: List[str],
+    use_transpose: bool = False,
 ):
     """Formats original_facenet pnet weights to match the keras model
     """
@@ -286,10 +309,12 @@ def _gen_mtcnn_net_weights(
         if reshape_fn is None:
             reshape_fn = lambda x: x
         if layer_name.startswith("conv"):
-            # transposed_weights = np.transpose(
-            #     weight_dict[layer_name]["weights"], (1, 0, 2, 3)
-            # )
-            yield reshape_fn(weight_dict[layer_name]["weights"])
+            weights = weight_dict[layer_name]["weights"]
+
+            if use_transpose and len(weights.shape) == 4:
+                weights = np.transpose(weights, (1, 0, 2, 3))
+
+            yield reshape_fn(weights)
             yield reshape_fn(weight_dict[layer_name]["biases"])
         elif layer_name.lower().startswith("prelu"):
             alpha = weight_dict[layer_name]["alpha"]
@@ -324,7 +349,10 @@ _model_paths = {
 
 
 class _KerasMTCNNNet:
-    _net_name = None
+    """Base class for Keras Mtcnn networks
+    """
+
+    net_name = None
     _factories = {"pnet": create_pnet, "rnet": create_rnet, "onet": create_onet}
     _weight_formatters = {
         "pnet": format_pnet_weights,
@@ -342,19 +370,44 @@ class _KerasMTCNNNet:
     ):
         self.data_format = data_format
         self.debug_input_output_dir = debug_input_output_dir
-        self.model = self._factories[self._net_name](data_format=data_format, **kwargs)
+        self.model = self._factories[self.net_name](data_format=data_format, **kwargs)
         weights_dict = np.load(model_path, allow_pickle=True, encoding="latin1").item()
-        weights = self._weight_formatters[self._net_name](weights_dict, data_format)
+        weights = self._weight_formatters[self.net_name](weights_dict, data_format)
         self.model.set_weights(weights)
+
+    @property
+    def inputs(self):
+        return self.model.inputs
+
+    @property
+    def input_shapes(self):
+        return tuple(
+            tuple(int(x) for x in input_tensor.shape[1:])
+            for input_tensor in self.inputs
+        )
+
+    @property
+    def normalized_input_names(self):
+        return tuple(
+            input_tensor.name.replace(":0", "") for input_tensor in self.inputs
+        )
+
+    @property
+    def outputs(self):
+        return self.model.outputs
+
+    @property
+    def normalized_output_names(self):
+        return tuple(t.name.replace(":0", "") for t in self.outputs)
 
     @classmethod
     def default_model(cls, **kwargs):
-        model_path = str(_model_paths[cls._net_name])
+        model_path = str(_model_paths[cls.net_name])
         return cls(model_path=model_path, **kwargs)
 
     def predict(self, image_arr: np.ndarray) -> Any:
         # This transpose (NHWC -> NWHC) is required by the original caffe weights... this is pain
-        image_arr = np.transpose(image_arr, (0, 2, 1, 3))
+        # image_arr = np.transpose(image_arr, (0, 2, 1, 3))
         if self.data_format == "channels_first":
             assert False
             image_arr = image_arr.transpose((0, 3, 1, 2))
@@ -370,13 +423,13 @@ class _KerasMTCNNNet:
         return self.predict(*args, **kwargs)
 
     def freeze(self) -> Any:
-        return freeze_tf_keras_model(self._net_name, self.model)
+        return freeze_tf_keras_model(self.net_name, self.model)
 
     def freeze_and_save(self, output_path: Path) -> None:
-        freeze_and_save_tf_keras_model(self._net_name, self.model, output_path)
+        freeze_and_save_tf_keras_model(self.net_name, self.model, output_path)
 
     def freeze_to_uff(self):
-        return freeze_tf_keras_model_to_uff(self._net_name, self.model)
+        return freeze_tf_keras_model_to_uff(self.net_name, self.model)
 
     def _save_input_output_if_debug(self, image_arr, out):
         if self.debug_input_output_dir:
@@ -398,53 +451,28 @@ class _KerasMTCNNNet:
     def _save(self, arr, desc):
         rendered_shape = "-".join(f"{x:d}" for x in arr.shape)
         input_path = self.debug_input_output_dir.joinpath(
-            f"{self._net_name}_{rendered_shape}_{desc}.npy"
+            f"{self.net_name}_{rendered_shape}_{desc}.npy"
         )
         np.save(input_path, arr)
 
 
 class KerasPNet(_KerasMTCNNNet):
-    _net_name = "pnet"
-
-    def __init__(
-        self,
-        *,
-        input_shape: Tuple[Optional[int], Optional[int]] = (None, None),
-        **kwargs,
-    ) -> None:
-        # We swap the channel order because the default weights require this
-        h, w = input_shape
-        super().__init__(input_shape=(w, h), **kwargs)
-
-    def predict(self, image_arr: np.ndarray):
-        prob, reg = super().predict(image_arr)
-        prob = np.transpose(prob, (0, 2, 1, 3))
-        reg = np.transpose(reg, (0, 2, 1, 3))
-        return prob, reg
+    net_name = "pnet"
 
 
 class KerasRNet(_KerasMTCNNNet):
-    _net_name = "rnet"
-
-    # def predict(self, image_arr: np.ndarray) -> Any:
-    #     prob, reg = super().predict(image_arr)
-    #     prob = np.transpose(prob, (0, 2, 1, 3))
-    #     reg = np.transpose(reg, (0, 2, 1, 3))
-    #     return prob, reg
+    net_name = "rnet"
 
 
 class KerasONet(_KerasMTCNNNet):
-    _net_name = "onet"
-
-    # def predict(self, image_arr: np.ndarray) -> Any:
-    #     prob, reg, landmarks = super().predict(image_arr)
-    #     prob = np.transpose(prob, (0, 2, 1, 3))
-    #     reg = np.transpose(reg, (0, 2, 1, 3))
-    #     return prob, reg, landmarks
+    net_name = "onet"
 
 
 class TRTNet:
-    LOGGER = trt.Logger(trt.Logger.VERBOSE)
+    """Base class for running Tensorrt nets
+    """
+
+    LOGGER = trt.Logger(trt.Logger.INFO)
 
     PREDEFINED_NET_SHAPES = {
         "conv_216x384": {
@@ -486,6 +514,8 @@ class TRTNet:
     def create_from_uff_file(
         model_path: str, inputs: List[Tuple[str, Any, Any]], output_names: List[str]
     ):
+        if isinstance(model_path, Path):
+            model_path = str(model_path)
         builder = trt.Builder(TRTNet.LOGGER)
         parser, network = TRTNet.build_parser_and_network(builder, inputs, output_names)
         parser.parse(model_path, network)

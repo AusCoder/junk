@@ -69,7 +69,8 @@ RUN \
   && python -m pip install \
     opencv-python \
     tensorflow==1.14.0 \
-    click
+    click \
+  && dpkg -i /opt/tensorrt/python/*-tf_*.deb
 
 ENV LC_ALL=C.UTF-8
 ENV OPENCV_LIB_DIR=/opt/opencv/install/lib

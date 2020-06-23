@@ -136,7 +136,9 @@ def debug_verify_trt():
         freeze_tf_keras_model_to_uff,
     )
 
-    input_shape = (384, 216)
+    # input_shape = (24, 24)
+    input_shape = (216, 384)
+    batch_size = 1
     data_format = "channels_last"
     keras_model = create_debug_net(data_format, input_shape)
     load_weights(data_format, keras_model)
@@ -158,22 +160,64 @@ def debug_verify_trt():
 
     trt_model.start()
 
-    _verify_keras_and_trt_models(keras_model, trt_model)
+    _verify_keras_and_trt_models(keras_model, trt_model, batch_size, input_shape)
 
 
-def _verify_keras_and_trt_models(keras_model, trt_model):
-    inpt = np.zeros((1, 384, 216, 3), dtype=np.float32)
+@main.command(help="Verifies that trt and keras output agree on Pnet, Onet and Rnet")
+def verify_all():
+    import tensorrt as trt
+
+    model_factories = [
+        (lambda: KerasPNet.default_model(input_shape=(216, 384)), 1),
+        (lambda: KerasRNet.default_model(), 1),
+        (lambda: KerasONet.default_model(), 1),
+    ]
+
+    output_dir = Path(__file__).parent.joinpath("data", "debug_uff")
+    output_dir.mkdir(exist_ok=True, parents=True)
+
+    frozen_graph_infos = []
+
+    for model_factory, batch_size in model_factories:
+        keras_model = model_factory()
+        frozen_graph_info, uff_graph_def = keras_model.freeze_to_uff()
+        frozen_graph_infos.append(frozen_graph_info)
+        uff_graph_path = output_dir.joinpath(f"{keras_model.net_name}.uff")
+        uff_graph_path.write_bytes(uff_graph_def)
+
+        (input_shape,) = keras_model.input_shapes
+        trt_model = TRTNet.create_from_uff_file(
+            uff_graph_path,
+            inputs=[
+                (
+                    keras_model.normalized_input_names[0],
+                    input_shape,
+                    trt.UffInputOrder.NHWC,
+                )
+            ],
+            output_names=keras_model.normalized_output_names,
+        )
+        trt_model.start()
+        _verify_keras_and_trt_models(keras_model, trt_model, batch_size, input_shape)
+        clear_keras_session()
+
+
+def _verify_keras_and_trt_models(keras_model, trt_model, batch_size, input_shape):
+    if len(input_shape) == 2:
+        input_shape = (*input_shape, 3)
+    # inpt = np.zeros((batch_size, *input_shape), dtype=np.float32)
+    inpt = np.random.rand(batch_size, *input_shape).astype(np.float32)
     keras_outputs = keras_model.predict(inpt)
     if not isinstance(keras_outputs, list):
         keras_outputs = [keras_outputs]
     trt_outputs = trt_model.predict(inpt)
     assert len(keras_outputs) == len(trt_outputs)
     for keras_output, trt_output in zip(keras_outputs, trt_outputs):
-        print(
+        click.echo(
             f"Output shape: {keras_output.shape}. First 10: {keras_output.reshape(-1)[:10]}"
         )
         np.testing.assert_allclose(
-            keras_output.reshape(-1), trt_output.reshape(-1), atol=1e-6, rtol=1e-6
+            keras_output.reshape(-1), trt_output.reshape(-1), atol=1e-5, rtol=1e-4
         )
     click.echo("Keras TRT output verified")
 
@@ -183,11 +227,11 @@ def debug_transposed_weights():
     from mtcnn_base import KerasPNet
 
     image = _read_rgb_image()
-    image = cv2.resize(image, (216, 384))
+    image = cv2.resize(image, (384, 216))
     image = image.astype(np.float32)
     image = image.reshape((1, *image.shape))
     image = (image - 127.5) / 128.0
-    pnet = KerasPNet.default_model()
+    pnet = KerasPNet.default_model(input_shape=(216, 384))
     prob, reg = pnet.predict(image)
     print(f"Prob shape: {prob.shape}. First 10: {prob.reshape(-1)[:10]}")
     print(f"Reg shape: {reg.shape}. First 10: {reg.reshape(-1)[:10]}")
@@ -195,9 +239,3 @@ def debug_transposed_weights():
 
 if __name__ == "__main__":
     main()
-
-
-# Output shape: (1, 187, 103, 2). First 10: [ 3.984418 -4.990023  3.984418 -4.990023  3.984418 -4.990023  3.984418
-#  -4.990023  3.984418 -4.990023]
-# Output shape: (1, 187, 103, 4). First 10: [-0.02140094 -0.15377651  0.03942679  0.14396223 -0.02140094 -0.15377651
-#   0.03942679  0.14396223 -0.02140094 -0.15377651]
