@@ -98,9 +98,10 @@ def save_uff():
 
 @main.command()
 @click.option(
-    "-o", "--debug-input-output-dir", help="Directory to write debug net input output"
+    "--debug-input-output-dir", help="Directory to write debug net input output"
 )
-def run_keras(debug_input_output_dir):
+@click.option("-o", "--output", help="Where to write image")
+def run_keras(debug_input_output_dir, output):
     if debug_input_output_dir:
         debug_input_output_dir = Path(debug_input_output_dir)
     DEFAULT_IMAGE_SIZE = (720, 1280)
@@ -111,6 +112,18 @@ def run_keras(debug_input_output_dir):
     image = _read_rgb_image()
     result = mtcnn.predict(image)
     click.echo(result)
+
+    if output:
+        boxes, _ = result
+        for x_min, y_min, x_max, y_max in boxes:
+            cv2.rectangle(
+                image,
+                (int(x_min), int(y_min)),
+                (int(x_max), int(y_max)),
+                (0, 255, 0),
+                thickness=2,
+            )
+        cv2.imwrite(output, cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
 
 
 @main.command()
