@@ -83,6 +83,12 @@ fn main() {
         opt1.unwrap_or(3),
         opt2.unwrap_or_else(|| 3)
     );
+
+    // Matching
+    let methods = [TransportMethod::Car, TransportMethod::Walk];
+    for method in methods.iter() {
+        println!("{:?} speed: {}", method, speed(method));
+    }
 }
 
 fn print_on_chair(s: String) {
@@ -132,4 +138,17 @@ impl Rectangle {
 struct User {
     name: String,
     age: u32,
+}
+
+#[derive(Debug)]
+enum TransportMethod {
+    Car,
+    Walk,
+}
+
+fn speed(transport_method: &TransportMethod) -> u32 {
+    match transport_method {
+        TransportMethod::Car => 50,
+        TransportMethod::Walk => 5,
+    }
 }
