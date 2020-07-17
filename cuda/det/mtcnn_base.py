@@ -492,16 +492,24 @@ class TRTNet:
     def __init__(
         self,
         engine: trt.ICudaEngine,
+        network: trt.INetworkDefinition,
         input_names: List[str],
         output_names: List[str],
-        batch_size: int = 1,
+        max_batch_size: int = 8,
     ):
         self.input_names = input_names
         self.output_names = output_names
         # TODO: provide a way to limit to max_batch_size from the cuda engine
-        self.batch_size = batch_size
+        self.max_batch_size = max_batch_size
 
         self.engine = engine
+        self.network = network
+
+        self.output_shapes = {
+            self.network.get_output(i).name: self.network.get_output(i).shape
+            for i in range(self.network.num_outputs)
+        }
+
         self.context = None
         self.stream = None
         self.h_inputs = None
@@ -521,13 +529,18 @@ class TRTNet:
         parser.parse(model_path, network)
         engine = builder.build_cuda_engine(network)
         input_names = [n for n, _, _ in inputs]
-        return TRTNet(engine=engine, input_names=input_names, output_names=output_names)
+        return TRTNet(
+            engine=engine,
+            network=network,
+            input_names=input_names,
+            output_names=output_names,
+        )
 
     @staticmethod
     def build_parser_and_network(
         builder, inputs: List[Tuple[str, Any, Any]], output_names: List[str]
     ):
-        builder.max_batch_size = 16
+        builder.max_batch_size = 8
         # This determines the amount of memory available to the builder when building an optimized engine and should generally be set as high as possible.
         builder.max_workspace_size = 1 << 30
 
@@ -590,7 +603,7 @@ class TRTNet:
             volume = functools.reduce(
                 operator.mul, (int(d) for d in self.engine.get_binding_shape(idx))
             )
-            volume *= self.batch_size
+            volume *= self.max_batch_size
             host_allocations[name] = cuda.pagelocked_empty(volume, dtype=np.float32)
         return host_allocations
 
@@ -602,9 +615,41 @@ class TRTNet:
 
         Also performs no validation of input shape.
         """
-        (inpt,) = self.h_inputs.values()
-        inpt[...] = image_arr.reshape(-1)
-        return self._run()
+        batches = self._gen_batches(image_arr)
+
+        image_batch_size = image_arr.shape[0] if image_arr.ndim == 4 else 1
+        outputs = [
+            np.empty((image_batch_size, *self.output_shapes[n]), dtype=np.float32)
+            for n in self.output_names
+        ]
+        idx = 0
+
+        for batch in batches:
+            batch_size = batch.shape[0]
+            flat_batch = batch.reshape(-1)
+            (net_input,) = self.h_inputs.values()
+            net_input[: len(flat_batch)] = flat_batch
+            batch_outputs = self._run()
+            batch_outputs = [x[:batch_size] for x in batch_outputs]
+            for output, batch_output in zip(outputs, batch_outputs):
+                output[idx : idx + batch_size, ...] = batch_output
+            idx += batch_size
+        return outputs
+
+    def _gen_batches(self, image_arr: np.ndarray):
+        if image_arr.ndim == 3:
+            image_arr = image_arr.reshape((1, *image_arr.shape))
+            image_batch_size = 1
+        elif image_arr.ndim == 4:
+            image_batch_size = image_arr.shape[0]
+        else:
+            raise ValueError(f"Unexpected image_arr shape: {image_arr.shape}")
+
+        idx = 0
+        while idx < image_batch_size:
+            batch = image_arr[idx : idx + self.max_batch_size]
+            yield batch
+            idx += self.max_batch_size
 
     def _run(self):
         # Transfer input data to the GPU.
@@ -626,7 +671,7 @@ class TRTNet:
         # bindings = [int(x) for x in bindings]
         self.context.execute_async(
             bindings=bindings,
-            batch_size=self.batch_size,
+            batch_size=self.max_batch_size,
             stream_handle=self.stream.handle,
         )
         # Transfer predictions back from the GPU.
@@ -636,7 +681,10 @@ class TRTNet:
             )
         # Synchronize the stream
         self.stream.synchronize()
-        outputs = [self.h_outputs[n] for n in self.output_names]
+        outputs = [
+            self.h_outputs[n].reshape((-1, *self.output_shapes[n]))
+            for n in self.output_names
+        ]
         return outputs
 
 

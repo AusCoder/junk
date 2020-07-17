@@ -171,6 +171,8 @@ def verify_all():
         (lambda: KerasPNet.default_model(input_shape=(216, 384)), 1),
         (lambda: KerasRNet.default_model(), 1),
         (lambda: KerasONet.default_model(), 1),
+        (lambda: KerasRNet.default_model(), 10),
+        (lambda: KerasONet.default_model(), 10),
     ]
 
     output_dir = Path(__file__).parent.joinpath("data", "debug_uff")
@@ -205,7 +207,6 @@ def verify_all():
 def _verify_keras_and_trt_models(keras_model, trt_model, batch_size, input_shape):
     if len(input_shape) == 2:
         input_shape = (*input_shape, 3)
-    # inpt = np.zeros((batch_size, *input_shape), dtype=np.float32)
     inpt = np.random.rand(batch_size, *input_shape).astype(np.float32)
     keras_outputs = keras_model.predict(inpt)
     if not isinstance(keras_outputs, list):

@@ -69,6 +69,7 @@ RUN \
   && python -m pip install \
     opencv-python \
     tensorflow==1.14.0 \
+    scipy \
     click \
   && dpkg -i /opt/tensorrt/python/*-tf_*.deb
 
