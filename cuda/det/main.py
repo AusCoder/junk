@@ -1,3 +1,4 @@
+import json
 import logging
 from pathlib import Path
 
@@ -66,31 +67,27 @@ def save_uff():
 
     frozen_graph_infos = []
 
-    for scale in scales:
-        scaled_height, scaled_width = compute_height_width_at_scale(
-            scale, height, width
+    def _gen_nets():
+        scaled_height_width = (
+            compute_height_width_at_scale(scale, height, width) for scale in scales
         )
-        graph_name = f"pnet_{scaled_height}x{scaled_width}"
+        for scaled_height, scaled_width in scaled_height_width:
+            name = f"pnet_{scaled_height}x{scaled_width}"
+            pnet = KerasPNet.default_model(input_shape=(scaled_height, scaled_width))
+            yield name, pnet
+        yield "rnet", KerasRNet.default_model()
+        yield "onet", KerasONet.default_model()
 
-        pnet = KerasPNet.default_model(input_shape=(scaled_height, scaled_width))
-        frozen_graph_info, uff_graph_def = pnet.freeze_to_uff()
+    for net_name, net in _gen_nets():
+        frozen_graph_info, uff_graph_def = net.freeze_to_uff()
         frozen_graph_infos.append(frozen_graph_info)
 
-        uff_outdir.joinpath(f"{graph_name}.uff").write_bytes(uff_graph_def)
-        pnet.freeze_and_save(tf_outdir.joinpath(f"pnet_{graph_name}.pb"))
+        uff_outdir.joinpath(f"{net_name}.uff").write_bytes(uff_graph_def)
+        uff_outdir.joinpath(f"{net_name}-info.json").write_text(
+            json.dumps(frozen_graph_info.net_info.__dict__)
+        )
+        net.freeze_and_save(tf_outdir.joinpath(f"{net_name}.pb"))
         clear_keras_session()
-
-    rnet = KerasRNet.default_model()
-    frozen_graph_info, uff_graph_def = rnet.freeze_to_uff()
-    uff_outdir.joinpath(f"rnet.uff").write_bytes(uff_graph_def)
-    rnet.freeze_and_save(tf_outdir.joinpath(f"rnet.pb"))
-    frozen_graph_infos.append(frozen_graph_info)
-
-    onet = KerasONet.default_model()
-    frozen_graph_info, uff_graph_def = onet.freeze_to_uff()
-    uff_outdir.joinpath(f"onet.uff").write_bytes(uff_graph_def)
-    onet.freeze_and_save(tf_outdir.joinpath(f"onet.pb"))
-    frozen_graph_infos.append(frozen_graph_info)
 
     for info in frozen_graph_infos:
         click.echo(info)

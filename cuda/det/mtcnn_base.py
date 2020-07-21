@@ -20,22 +20,72 @@ def clear_keras_session():
     K_tf.clear_session()
 
 
+class NetInfo:
+    def __init__(self, inputs, outputs):
+        self.inputs = inputs
+        self.outputs = outputs
+
+    def __repr__(self):
+        rendered_attrs = ", ".join(f"{k}={v}" for k, v in self.__dict__.items())
+        return f"{self.__class__.__name__}({rendered_attrs})"
+
+    @property
+    def input_names(self):
+        return [x["name"] for x in self.inputs]
+
+    @property
+    def input_shapes(self):
+        return [x["shape"] for x in self.inputs]
+
+    @property
+    def output_names(self):
+        return [x["name"] for x in self.outputs]
+
+    @property
+    def output_shapes(self):
+        return [x["shape"] for x in self.outputs]
+
+
 class FrozenGraphWithInfo:
-    def __init__(
-        self, name, frozen_graph, input_names, input_shapes, output_names, output_shapes
-    ):
+    def __init__(self, name, frozen_graph, net_info):
         self.name = name
         self.frozen_graph = frozen_graph
-        self.input_names = input_names
-        self.input_shapes = input_shapes
-        self.output_names = output_names
-        self.output_shapes = output_shapes
+        self.net_info = net_info
 
     def __repr__(self):
         rendered_attrs = ", ".join(
             f"{k}={v}" for k, v in self.__dict__.items() if k != "frozen_graph"
         )
         return f"{self.__class__.__name__}({rendered_attrs})"
+
+
+def net_info_from_keras_model(keras_model, data_format=None) -> NetInfo:
+    if data_format is None and keras_model.inputs[0].shape[-1] == 3:
+        data_format == "channels_last"
+    elif data_format is None:
+        assert False
+        logger.warning(
+            "Attempted to derive data_format from input shapes but could not. Input shapes %s",
+            keras_model.inputs[0].shape,
+        )
+    else:
+        assert False
+
+    input_format = "NHWC" if data_format == "channels_last" else "NCHW"
+    return NetInfo(
+        inputs=[
+            {
+                "name": t.name.split(":")[0],
+                "shape": [x.value for x in t.shape],
+                "format": input_format,
+            }
+            for t in keras_model.inputs
+        ],
+        outputs=[
+            {"name": t.name.split(":")[0], "shape": [x.value for x in t.shape],}
+            for t in keras_model.outputs
+        ],
+    )
 
 
 def freeze_tf_keras_model(name: str, model) -> FrozenGraphWithInfo:
@@ -48,21 +98,11 @@ def freeze_tf_keras_model(name: str, model) -> FrozenGraphWithInfo:
     """
     sess = K_tf.get_session()
     graph_def = sess.graph.as_graph_def()
-    input_names = [t.name.split(":")[0] for t in model.inputs]
-    output_names = [t.name.split(":")[0] for t in model.outputs]
-    input_shapes = [tuple(x.value for x in t.shape) for t in model.inputs]
-    output_shapes = [tuple(x.value for x in t.shape) for t in model.outputs]
+    net_info = net_info_from_keras_model(model)
     frozen_graph = tf.graph_util.convert_variables_to_constants(
-        sess, graph_def, output_names
+        sess, graph_def, net_info.output_names
     )
-    return FrozenGraphWithInfo(
-        name=name,
-        frozen_graph=frozen_graph,
-        input_names=input_names,
-        input_shapes=input_shapes,
-        output_names=output_names,
-        output_shapes=output_shapes,
-    )
+    return FrozenGraphWithInfo(name=name, frozen_graph=frozen_graph, net_info=net_info)
 
 
 def freeze_and_save_tf_keras_model(name, model, output_path: Path) -> None:
@@ -73,12 +113,11 @@ def freeze_and_save_tf_keras_model(name, model, output_path: Path) -> None:
         str(output_path.name),
         as_text=False,
     )
-
     logger.info(
-        f"Froze tensorflow.keras graph. Input names: {graph.input_names}. Input shapes: {graph.input_shapes}"
+        f"Froze tensorflow.keras graph. Input names: {graph.net_info.input_names}. Input shapes: {graph.net_info.input_shapes}"
     )
     logger.info(
-        f"Output names: {graph.output_names}. Output shapes: {graph.output_shapes}."
+        f"Output names: {graph.net_info.output_names}. Output shapes: {graph.net_info.output_shapes}."
     )
     logger.info(f"Output path: {output_path}")
 
@@ -374,31 +413,23 @@ class _KerasMTCNNNet:
         weights_dict = np.load(model_path, allow_pickle=True, encoding="latin1").item()
         weights = self._weight_formatters[self.net_name](weights_dict, data_format)
         self.model.set_weights(weights)
-
-    @property
-    def inputs(self):
-        return self.model.inputs
+        self.net_info = net_info_from_keras_model(self.model)
 
     @property
     def input_shapes(self):
-        return tuple(
-            tuple(int(x) for x in input_tensor.shape[1:])
-            for input_tensor in self.inputs
-        )
+        return self.net_info.input_shapes
 
     @property
     def normalized_input_names(self):
-        return tuple(
-            input_tensor.name.replace(":0", "") for input_tensor in self.inputs
-        )
+        return self.net_info.input_names
 
     @property
     def outputs(self):
-        return self.model.outputs
+        return self.net_info.output_shapes
 
     @property
     def normalized_output_names(self):
-        return tuple(t.name.replace(":0", "") for t in self.outputs)
+        return self.net_info.output_names
 
     @classmethod
     def default_model(cls, **kwargs):
