@@ -1,0 +1,65 @@
+#+TITLE: A Gentle Introduction to Org-mode
+* Org model tutorial from youtube
+  [[https://www.youtube.com/watch?v=SzA2YODtgK4][Source video]]
+* Outliner
+Text text text!
+** yet more items
+** more items
+** M-RET add new item
+** M-UP and M-DOWN move up and down
+* Markup
+*Bold* /italic/ =verbatim= +strikethrough+
+
+- bulleted list
+- another list item
+
+** Links with C-c C-l
+   [[https://www.gnu.org/software/emacs/manual/html_node/org/index.html][Org mode manual]]
+
+** Open links with C-c C-o
+
+* Tables
+You can create a table super easily!
+** Start
+| Some | Data|
+** Then
+|-
+** Then tab and you get a table!
+| Some | Data           |
+|------+----------------|
+|   12 | buckle my shoe |
+|   34 | shut the door  |
+
+* Export to other formats
+Export with C-c C-e
+
+* Source code
+Start a new source code block by typing < s then tab.
+Edit source code in the language mode of the code snippet with C-c '
+#+BEGIN_SRC python
+  import os
+
+  def some_cool_function():
+      print("abc")
+
+  def fact(x):
+      if x == 0:
+	  return 1
+      else:
+	  return x * fact(x - 1)
+#+END_SRC
+
+* Latex integration
+- Characters: \alpha \rightarrow
+- $O(n \log n)$
+
+Other latex integations possible like equation blocks, align blocks etc.
+
+* Literate programming
+
+* Todo stuff!
+Every project having a next step is useful.
+
+** DONE export todo lists
+** DONE cycle through states
+   C-c C-t
