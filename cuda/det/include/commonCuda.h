@@ -1,11 +1,10 @@
 #ifndef _COMMON_CUDA_H
 #define _COMMON_CUDA_H
 
-#include <exception>
-#include <iostream>
-
 #include "cuda_runtime.h"
 #include "NvInferRuntimeCommon.h"
+
+#include <iostream>
 
 #define CUDACHECK(status)                                                      \
   do {                                                                         \

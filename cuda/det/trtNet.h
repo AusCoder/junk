@@ -18,28 +18,8 @@ and Contexts etc.
 #include <utility>
 #include <vector>
 
-// enum class InputOrder { None, NHWC };
-
-// struct TensorInfo {
-//   TensorInfo(std::string n, nvinfer1::Dims3 s, InputOrder i);
-//   TensorInfo(std::string n, nvinfer1::Dims3 s);
-//   // Are these really required?
-//   // TensorInfo(const TensorInfo &tensorInfo);
-
-//   std::string name;
-//   nvinfer1::Dims3 shape;
-//   InputOrder inputOrder;
-// };
-
-// struct TrtNetInfo {
-//   std::vector<TensorInfo> inputTensorInfos;
-//   std::vector<TensorInfo> outputTensorInfos;
-// };
-
 class TrtNet {
 public:
-  // static std::map<std::pair<int, int>, TrtNetInfo> TRT_NET_INFO;
-
   TrtNet(const std::string &p, const TrtNetInfo &i);
   ~TrtNet();
   TrtNet(TrtNet &&net);
@@ -55,15 +35,9 @@ public:
                        const std::vector<float *> &outputs,
                        cudaStream_t *stream);
 
-  // nvinfer1::Dims3 getInputShape();
-  // nvinfer1::Dims3 getOutputProbShape();
-  // nvinfer1::Dims3 getOutputRegShape();
-
   const TrtNetInfo &getTrtNetInfo();
   const TensorInfo &getInputTensorInfo(int i);
   const TensorInfo &getOutputTensorInfo(int i);
-
-  // static TrtNetInfo createPnetInfo();
 
 private:
   nvinfer1::IBuilder *builder = nullptr;
@@ -72,14 +46,6 @@ private:
 
   std::string modelPath;
   TrtNetInfo trtNetInfo;
-
-  // std::string inputName;
-  // std::string outputProbName;
-  // std::string outputRegName;
-
-  // nvinfer1::Dims3 inputShape;
-  // nvinfer1::Dims3 outputProbShape;
-  // nvinfer1::Dims3 outputRegShape;
 };
 
 #endif

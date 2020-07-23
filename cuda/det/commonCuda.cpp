@@ -1,5 +1,7 @@
 #include "commonCuda.h"
 
+#include <stdexcept>
+
 int dimsSize(nvinfer1::Dims dims) {
   if (dims.nbDims == -1) {
     throw std::invalid_argument("dims.nbDims is -1");
