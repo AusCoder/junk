@@ -5,22 +5,17 @@
 
 #include <cassert>
 #include <iostream>
+#include <fstream>
 #include <string>
 
-TensorInfo::TensorInfo(std::string n, nvinfer1::Dims3 s, InputOrder i):
-  name{n}, shape{s}, inputOrder{i} {}
+TrtNet::TrtNet(const std::string &p, const TrtNetInfo &i): modelPath{p}, trtNetInfo{i} {}
 
-TensorInfo::TensorInfo(std::string n, nvinfer1::Dims3 s):
-  name{n}, shape{s}, inputOrder{InputOrder::None} {}
-
-TrtNet::TrtNet(const std::string &p, const TrtNetInfo &i): modelPath{p}, netInfo{i} {}
-
-TrtNet::TrtNet(TrtNet &&net): builder{net.builder}, engine{net.engine}, context{net.context}, modelPath{net.modelPath}, netInfo{net.netInfo} {
+TrtNet::TrtNet(TrtNet &&net): builder{net.builder}, engine{net.engine}, context{net.context}, modelPath{net.modelPath}, trtNetInfo{net.trtNetInfo} {
   net.builder = nullptr;
   net.engine = nullptr;
   net.context = nullptr;
   net.modelPath = "";
-  net.netInfo = {};
+  net.trtNetInfo = {};
 }
 
 TrtNet::~TrtNet() {
@@ -35,15 +30,15 @@ TrtNet::~TrtNet() {
   }
 }
 
-// nvinfer1::Dims3 TrtNet::getInputShape() { return inputShape; };
-// nvinfer1::Dims3 TrtNet::getOutputProbShape() { return outputProbShape; };
-// nvinfer1::Dims3 TrtNet::getOutputRegShape() { return outputRegShape; };
+const TrtNetInfo &TrtNet::getTrtNetInfo() {
+  return trtNetInfo;
+}
 const TensorInfo &TrtNet::getInputTensorInfo(int i) {
-  return netInfo.inputTensorInfos.at(i);
+  return trtNetInfo.inputTensorInfos.at(i);
 }
 
 const TensorInfo &TrtNet::getOutputTensorInfo(int i) {
-  return netInfo.outputTensorInfos.at(i);
+  return trtNetInfo.outputTensorInfos.at(i);
 }
 
 /**
@@ -55,9 +50,9 @@ void TrtNet::start() {
 
   nvuffparser::IUffParser *parser = nvuffparser::createUffParser();
 
-  for (auto &tensorInfo : netInfo.inputTensorInfos) {
+  for (auto &tensorInfo : trtNetInfo.inputTensorInfos) {
     nvuffparser::UffInputOrder order;
-    if (tensorInfo.inputOrder == InputOrder::NHWC) {
+    if (tensorInfo.inputOrder == TensorInputOrder::NHWC) {
       order = nvuffparser::UffInputOrder::kNHWC;
     }
     // TODO: throw here
@@ -67,7 +62,7 @@ void TrtNet::start() {
     parser->registerInput(tensorInfo.name.c_str(), tensorInfo.shape,
                         order);
   }
-  for (auto &tensorInfo : netInfo.outputTensorInfos) {
+  for (auto &tensorInfo : trtNetInfo.outputTensorInfos) {
     parser->registerOutput(tensorInfo.name.c_str());
   }
   // parser->registerInput(inputName.c_str(), inputShape,
@@ -93,11 +88,11 @@ void TrtNet::start() {
 
 void TrtNet::predictFromHost(const std::vector<float *> &inputs, const std::vector<float *> &outputs,
   cudaStream_t *stream) {
-  int numBuffers = netInfo.inputTensorInfos.size() + netInfo.outputTensorInfos.size();
+  int numBuffers = trtNetInfo.inputTensorInfos.size() + trtNetInfo.outputTensorInfos.size();
   void *buffers[numBuffers];
 
   for (int i = 0; i < inputs.size(); i++) {
-    const TensorInfo &tensorInfo = netInfo.inputTensorInfos.at(i);
+    const TensorInfo &tensorInfo = trtNetInfo.inputTensorInfos.at(i);
     int bindingIndex = engine->getBindingIndex(
       tensorInfo.name.c_str()
     );
@@ -113,7 +108,7 @@ void TrtNet::predictFromHost(const std::vector<float *> &inputs, const std::vect
   }
 
   for (int i = 0; i < outputs.size(); i++) {
-    const TensorInfo &tensorInfo = netInfo.outputTensorInfos.at(i);
+    const TensorInfo &tensorInfo = trtNetInfo.outputTensorInfos.at(i);
     int bindingIndex = engine->getBindingIndex(
       tensorInfo.name.c_str()
     );
@@ -131,7 +126,7 @@ void TrtNet::predictFromHost(const std::vector<float *> &inputs, const std::vect
   }
 
   for (int i = 0; i < outputs.size(); i++) {
-    const TensorInfo &tensorInfo = netInfo.outputTensorInfos.at(i);
+    const TensorInfo &tensorInfo = trtNetInfo.outputTensorInfos.at(i);
     int bindingIndex = engine->getBindingIndex(
       tensorInfo.name.c_str()
     );
@@ -147,13 +142,4 @@ void TrtNet::predictFromHost(const std::vector<float *> &inputs, const std::vect
   for (int i = 0; i < numBuffers; i++) {
     CUDACHECK(cudaFree(buffers[i]));
   }
-}
-
-TrtNetInfo TrtNet::createPnetInfo() {
-  TrtNetInfo pnetInfo{};
-  pnetInfo.inputTensorInfos.push_back(
-      {"input_1", {384, 216, 3}, InputOrder::NHWC});
-  pnetInfo.outputTensorInfos.push_back({"conv2d_3/BiasAdd", {187, 103, 2}});
-  pnetInfo.outputTensorInfos.push_back({"conv2d_4/BiasAdd", {187, 103, 4}});
-  return pnetInfo;
 }

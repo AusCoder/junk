@@ -184,7 +184,7 @@ def verify_all():
         uff_graph_path = output_dir.joinpath(f"{keras_model.net_name}.uff")
         uff_graph_path.write_bytes(uff_graph_def)
 
-        (input_shape,) = keras_model.input_shapes
+        (input_shape,) = keras_model.input_shapes_without_batch
         trt_model = TRTNet.create_from_uff_file(
             uff_graph_path,
             inputs=[
@@ -204,7 +204,8 @@ def verify_all():
 def _verify_keras_and_trt_models(keras_model, trt_model, batch_size, input_shape):
     if len(input_shape) == 2:
         input_shape = (*input_shape, 3)
-    inpt = np.random.rand(batch_size, *input_shape).astype(np.float32)
+    # inpt = np.random.rand(batch_size, *input_shape).astype(np.float32)
+    inpt = np.zeros((batch_size, *input_shape), dtype=np.float32)
     keras_outputs = keras_model.predict(inpt)
     if not isinstance(keras_outputs, list):
         keras_outputs = [keras_outputs]

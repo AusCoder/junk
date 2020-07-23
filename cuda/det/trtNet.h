@@ -12,29 +12,29 @@ and Contexts etc.
 // #include "NvUffParser.h"
 #include "cuda_runtime.h"
 #include "logger.h"
-#include "trtNet.h"
+#include "trtNetInfo.h"
 
 #include <map>
 #include <utility>
 #include <vector>
 
-enum class InputOrder { None, NHWC };
+// enum class InputOrder { None, NHWC };
 
-struct TensorInfo {
-  TensorInfo(std::string n, nvinfer1::Dims3 s, InputOrder i);
-  TensorInfo(std::string n, nvinfer1::Dims3 s);
-  // Are these really required?
-  // TensorInfo(const TensorInfo &tensorInfo);
+// struct TensorInfo {
+//   TensorInfo(std::string n, nvinfer1::Dims3 s, InputOrder i);
+//   TensorInfo(std::string n, nvinfer1::Dims3 s);
+//   // Are these really required?
+//   // TensorInfo(const TensorInfo &tensorInfo);
 
-  std::string name;
-  nvinfer1::Dims3 shape;
-  InputOrder inputOrder;
-};
+//   std::string name;
+//   nvinfer1::Dims3 shape;
+//   InputOrder inputOrder;
+// };
 
-struct TrtNetInfo {
-  std::vector<TensorInfo> inputTensorInfos;
-  std::vector<TensorInfo> outputTensorInfos;
-};
+// struct TrtNetInfo {
+//   std::vector<TensorInfo> inputTensorInfos;
+//   std::vector<TensorInfo> outputTensorInfos;
+// };
 
 class TrtNet {
 public:
@@ -59,10 +59,11 @@ public:
   // nvinfer1::Dims3 getOutputProbShape();
   // nvinfer1::Dims3 getOutputRegShape();
 
+  const TrtNetInfo &getTrtNetInfo();
   const TensorInfo &getInputTensorInfo(int i);
   const TensorInfo &getOutputTensorInfo(int i);
 
-  static TrtNetInfo createPnetInfo();
+  // static TrtNetInfo createPnetInfo();
 
 private:
   nvinfer1::IBuilder *builder = nullptr;
@@ -70,7 +71,7 @@ private:
   nvinfer1::IExecutionContext *context = nullptr;
 
   std::string modelPath;
-  TrtNetInfo netInfo;
+  TrtNetInfo trtNetInfo;
 
   // std::string inputName;
   // std::string outputProbName;

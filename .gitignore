@@ -7,9 +7,12 @@ cropResize
 cropResizeCpu
 mainMtcnn
 loggerSample
+trtNetMain
+
 cuda/det/data/frzn/
 cuda/det/data/uff/
 cuda/det/data/pkgs/
+cuda/det/data/debug_uff/
 
 imShow
 showPixels

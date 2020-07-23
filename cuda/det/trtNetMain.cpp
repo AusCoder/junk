@@ -2,13 +2,15 @@
 #include "cnpy.h"
 #include "commonCuda.h"
 #include "trtNet.h"
+#include "trtNetInfo.h"
 
 #include <iostream>
 #include <vector>
 
 int main(int argc, char **argv) {
-  TrtNetInfo pnetInfo{TrtNet::createPnetInfo()};
-  TrtNet net{"data/debug_uff/debug_net.uff", pnetInfo};
+  TrtNetInfo pnetInfo{TrtNetInfo::readTrtNetInfo("data/uff/pnet_216x384-info.json")};
+  TrtNet net{"data/uff/pnet_216x384.uff", pnetInfo};
+  std::cout << net.getTrtNetInfo().render() << "\n";
   net.start();
 
   std::vector<std::vector<float>> inputs;
@@ -70,3 +72,15 @@ int main(int argc, char **argv) {
 
   CUDACHECK(cudaStreamDestroy(stream));
 }
+
+
+// Outputs agree on zeros input:
+
+// outputProb: 3.98442 -4.99002 3.98442 -4.99002 3.98442 -4.99002 3.98442 -4.99002 3.98442 -4.99002
+// outputReg: -0.021401 -0.153777 0.0394268 0.143962 -0.021401 -0.153777 0.0394268 0.143962 -0.021401 -0.153777
+
+// first values for image: [0. 0. 0. 0. 0. 0. 0. 0. 0. 0.]
+// Output shape: (1, 103, 187, 2). First 10: [ 3.984418 -4.990023  3.984418 -4.990023  3.984418 -4.990023  3.984418
+//  -4.990023  3.984418 -4.990023]
+// Output shape: (1, 103, 187, 4). First 10: [-0.02140094 -0.15377651  0.03942679  0.14396223 -0.02140094 -0.15377651
+//   0.03942679  0.14396223 -0.02140094 -0.15377651]

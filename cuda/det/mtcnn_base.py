@@ -60,8 +60,8 @@ class FrozenGraphWithInfo:
 
 
 def net_info_from_keras_model(keras_model, data_format=None) -> NetInfo:
-    if data_format is None and keras_model.inputs[0].shape[-1] == 3:
-        data_format == "channels_last"
+    if data_format is None and keras_model.inputs[0].shape[-1].value == 3:
+        data_format = "channels_last"
     elif data_format is None:
         assert False
         logger.warning(
@@ -418,6 +418,10 @@ class _KerasMTCNNNet:
     @property
     def input_shapes(self):
         return self.net_info.input_shapes
+
+    @property
+    def input_shapes_without_batch(self):
+        return tuple(s[1:] for s in self.net_info.input_shapes)
 
     @property
     def normalized_input_names(self):
