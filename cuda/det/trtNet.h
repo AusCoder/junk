@@ -31,8 +31,15 @@ public:
   void start();
 
   // void predict(const std::vector<float *> inputs);
+  void predict(
+    const std::vector<float *> &inputs,
+    const std::vector<float *> &outputs,
+    int batchSize,
+    cudaStream_t *stream
+  );
   void predictFromHost(const std::vector<float *> &inputs,
                        const std::vector<float *> &outputs,
+                       int batchSize,
                        cudaStream_t *stream);
 
   const TrtNetInfo &getTrtNetInfo();

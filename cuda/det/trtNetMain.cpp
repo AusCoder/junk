@@ -56,7 +56,7 @@ int main(int argc, char **argv) {
 
   // net.predict(image.data(), imageSize, outputProb.data(), outputProbSize,
   //             outputReg.data(), outputRegSize, &stream);
-  net.predictFromHost(netInputs, netOutputs, &stream);
+  net.predictFromHost(netInputs, netOutputs, 1, &stream);
 
   std::cout << "outputProb: ";
   for (int i = 0; i < 10; i++) {

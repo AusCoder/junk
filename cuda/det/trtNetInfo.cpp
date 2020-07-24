@@ -1,4 +1,5 @@
 #include "trtNetInfo.h"
+#include "commonCuda.h"
 
 #include <fstream>
 #include <sstream>
@@ -23,6 +24,10 @@ std::string TensorInfo::render() const {
     shape.d[0] << ", " << shape.d[1] << ", " << shape.d[2] << ")"
     << ", order=" << orderStr << ")";
   return ss.str();
+}
+
+int TensorInfo::volume() const {
+  return dimsSize(shape);
 }
 
 std::string TrtNetInfo::render() const {

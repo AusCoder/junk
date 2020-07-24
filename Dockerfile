@@ -74,7 +74,9 @@ RUN \
   && dpkg -i /opt/tensorrt/python/*-tf_*.deb
 
 RUN \
-  apt install libjsoncpp-dev
+  apt install -y --no-install-recommends \
+    gdb \
+    libjsoncpp-dev
 
 ENV LC_ALL=C.UTF-8
 ENV OPENCV_LIB_DIR=/opt/opencv/install/lib
