@@ -42,6 +42,12 @@ const TensorInfo &TrtNet::getOutputTensorInfo(int i) {
   return trtNetInfo.outputTensorInfos.at(i);
 }
 
+TrtNet TrtNet::createFromUffAndInfoFile(const std::string &uffPath) {
+  std::string infoPath = uffPath.substr(0, uffPath.rfind('.')) + "-info.json";
+  TrtNetInfo netInfo{TrtNetInfo::readTrtNetInfo(infoPath)};
+  return {uffPath, netInfo};
+}
+
 /**
  * Can we put more than one graph in a ICudaEngine?
  */

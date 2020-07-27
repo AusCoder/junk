@@ -16,6 +16,8 @@ struct TensorInfo {
   nvinfer1::Dims3 shape;
   TensorInputOrder inputOrder;
 
+  int getHeight() const;
+  int getWidth() const;
   int volume() const;
   std::string render() const;
 };

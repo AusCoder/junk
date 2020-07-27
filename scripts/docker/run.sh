@@ -21,7 +21,7 @@ else
     --gpus=all \
     --cap-add=SYS_PTRACE \
     --security-opt seccomp:unconfined \
-    --workdir /code/junk \
+    --workdir /code/junk/cuda/det \
     -e "TERM=xterm-256color" \
     -v $(pwd):/code/junk \
     ${IMAGE_TAG} \

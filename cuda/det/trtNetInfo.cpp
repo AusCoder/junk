@@ -2,15 +2,15 @@
 #include "commonCuda.h"
 
 #include <fstream>
+#include <json/json.h>
 #include <sstream>
 #include <stdexcept>
-#include <json/json.h>
 
-TensorInfo::TensorInfo(std::string n, nvinfer1::Dims3 s, TensorInputOrder i):
-  name{n}, shape{s}, inputOrder{i} {}
+TensorInfo::TensorInfo(std::string n, nvinfer1::Dims3 s, TensorInputOrder i)
+    : name{n}, shape{s}, inputOrder{i} {}
 
-TensorInfo::TensorInfo(std::string n, nvinfer1::Dims3 s):
-  name{n}, shape{s}, inputOrder{TensorInputOrder::None} {}
+TensorInfo::TensorInfo(std::string n, nvinfer1::Dims3 s)
+    : name{n}, shape{s}, inputOrder{TensorInputOrder::None} {}
 
 std::string TensorInfo::render() const {
   std::stringstream ss;
@@ -20,27 +20,27 @@ std::string TensorInfo::render() const {
   } else {
     orderStr = "None";
   }
-  ss << "TensorInfo(name=" << name << ", shape=(" <<
-    shape.d[0] << ", " << shape.d[1] << ", " << shape.d[2] << ")"
-    << ", order=" << orderStr << ")";
+  ss << "TensorInfo(name=" << name << ", shape=(" << shape.d[0] << ", "
+     << shape.d[1] << ", " << shape.d[2] << ")"
+     << ", order=" << orderStr << ")";
   return ss.str();
 }
 
-int TensorInfo::volume() const {
-  return dimsSize(shape);
-}
+int TensorInfo::getHeight() const { return shape.d[0]; }
+int TensorInfo::getWidth() const { return shape.d[1]; }
+int TensorInfo::volume() const { return dimsSize(shape); }
 
 std::string TrtNetInfo::render() const {
   std::stringstream ss;
   ss << "TrtNetInfo(\n  inputTensorInfos=[\n";
-  for (auto &x: inputTensorInfos) {
+  for (auto &x : inputTensorInfos) {
     ss << "    " << x.render() << "\n";
   }
   ss << "  ],\n  outputTensorInfos=[\n";
-  for (auto &x: outputTensorInfos) {
+  for (auto &x : outputTensorInfos) {
     ss << "    " << x.render() << "\n";
   }
-  ss <<"  ]\n)";
+  ss << "  ]\n)";
   return ss.str();
 }
 
@@ -52,10 +52,11 @@ static std::string jsonGetString(const Json::Value &v, const std::string &key) {
   }
 }
 
-static nvinfer1::Dims3 jsonGetShape(const Json::Value &v, const std::string &key) {
+static nvinfer1::Dims3 jsonGetShape(const Json::Value &v,
+                                    const std::string &key) {
   std::vector<int> ds;
   if (v.isMember(key) && v[key].isArray()) {
-    for (auto &v: v[key]) {
+    for (auto &v : v[key]) {
       if (!v.isNull()) {
         ds.push_back(v.asInt());
       }
@@ -73,11 +74,11 @@ TrtNetInfo TrtNetInfo::readTrtNetInfo(const std::string &netInfoPath) {
   TrtNetInfo netInfo{};
   std::ifstream netInfoFile{netInfoPath};
   if (netInfoFile) {
-    Json::Reader reader {};
+    Json::Reader reader{};
     Json::Value value{};
     reader.parse(netInfoFile, value);
     if (value.isMember("inputs") && value["inputs"].isArray()) {
-      for (auto &v: value["inputs"]) {
+      for (auto &v : value["inputs"]) {
         TensorInputOrder inputOrder;
         std::string name;
         nvinfer1::Dims3 dims;
@@ -89,31 +90,28 @@ TrtNetInfo TrtNetInfo::readTrtNetInfo(const std::string &netInfoPath) {
         }
         name = jsonGetString(v, "name");
         dims = jsonGetShape(v, "shape");
-        netInfo.inputTensorInfos.push_back(
-          {name, dims, inputOrder}
-        );
+        netInfo.inputTensorInfos.push_back({name, dims, inputOrder});
       }
     } else {
       throw std::invalid_argument("inputs key not valid");
     }
 
     if (value.isMember("outputs")) {
-      for (auto &v: value["outputs"]) {
+      for (auto &v : value["outputs"]) {
         std::string name;
         nvinfer1::Dims3 dims;
 
         name = jsonGetString(v, "name");
         dims = jsonGetShape(v, "shape");
-        netInfo.outputTensorInfos.push_back(
-          {name, dims}
-        );
+        netInfo.outputTensorInfos.push_back({name, dims});
       }
     } else {
       throw std::invalid_argument("No outputs key");
     }
   } else {
     // TODO: change error type
-    throw std::invalid_argument("Couldn't read net description file: " + netInfoPath);
+    throw std::invalid_argument("Couldn't read net description file: " +
+                                netInfoPath);
   }
   return netInfo;
 }
