@@ -19,8 +19,12 @@ DEFAULT_HEIGHT = 720
 DEFAULT_WIDTH = 1280
 
 
-def _read_rgb_image():
-    image_path = Path.cwd().parent.parent.joinpath("tests", "data", "execs.jpg")
+def _read_rgb_image(image_path=None):
+    image_path = (
+        Path.cwd().parent.parent.joinpath("tests", "data", "execs.jpg")
+        if image_path is None
+        else image_path
+    )
     assert image_path.exists()
     image = cv2.cvtColor(cv2.imread(str(image_path)), cv2.COLOR_BGR2RGB)
     return image
@@ -94,11 +98,12 @@ def save_uff():
 
 
 @main.command()
+@click.option("-i", "--image", help="Image to run on", type=str)
 @click.option(
     "--debug-input-output-dir", help="Directory to write debug net input output"
 )
 @click.option("-o", "--output", help="Where to write image")
-def run_keras(debug_input_output_dir, output):
+def run_keras(image, debug_input_output_dir, output):
     if debug_input_output_dir:
         debug_input_output_dir = Path(debug_input_output_dir)
     DEFAULT_IMAGE_SIZE = (720, 1280)
@@ -106,7 +111,7 @@ def run_keras(debug_input_output_dir, output):
     mtcnn = MTCNN.keras_predictors(
         debug_input_output_dir=debug_input_output_dir, image_size=DEFAULT_IMAGE_SIZE
     )
-    image = _read_rgb_image()
+    image = _read_rgb_image(Path(image) if image else None)
     result = mtcnn.predict(image)
     click.echo(result)
 

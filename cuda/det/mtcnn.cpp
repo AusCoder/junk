@@ -44,9 +44,11 @@ void Mtcnn::stageOne(cv::Mat image) {
     // Want to allocate gpu buffers up front as much as possible
     // Buffers
     // - initial image buffer
-    // - buffers for image resize: transpose buffer + resize buffer
-    //  - try to not require transpose for image resize
-    // - pnet input buffer
+    // - buffer for resized image (same as pnet input buffer)
+    // - pnet output buffers
+    // - other buffers for nms indices (as required)
+    //    - makes sense to roll lots of these into a mega kernel I think
+
     int widthScaled = ceil(imageWidth * scale);
     int heightScaled = ceil(imageHeight * scale);
     std::cout << heightScaled << ", " << widthScaled << std::endl;
