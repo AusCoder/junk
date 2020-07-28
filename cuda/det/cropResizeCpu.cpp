@@ -178,7 +178,7 @@ int main(int argc, char **argv) {
 
   auto croppedBoxesArr =
       runCropResize(image.ptr<float>(), imageWidth, imageHeight, depth, boxes,
-                    boxesSize, cropHeight, cropWidth);
+                    boxesSize, cropWidth, cropHeight);
   cv::Mat croppedImage{cropHeight, cropWidth, CV_32FC3, croppedBoxesArr.data()};
   cv::Vec3f point = croppedImage.at<cv::Vec3f>(0);
   cout << point[0] << " " << point[1] << " " << point[2] << endl;

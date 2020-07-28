@@ -17,11 +17,11 @@ nmsGpu: nmsGpu.obj
 generateBoxes: generateBoxes.obj
 	$(CXX) $^ -o $@ $(LDFLAGS) $(LDLIBS)
 
-cropResize: cropResize.obj common.o
+cropResizeGpu: cropResizeGpu.o common.o cropResizeKernel.obj
 	$(CXX) $^ -o $@ $(LDFLAGS) $(LDLIBS)
 
-cropResizeCpu: cropResize.o common.o
-	$(CXX) $^ -o $@ $(LDFLAGS) -lopencv_core -lopencv_imgcodecs
+cropResizeCpu: cropResizeCpu.o common.o
+	$(CXX) $^ -o $@ $(LDFLAGS) $(LDLIBS)
 
 loadNumpy: loadNumpy.o
 	$(CXX) $^ -o $@ $(LDFLAGS) -lcnpy
@@ -46,5 +46,5 @@ test_trtNet: test_trtNet.o trtNet.o trtNetInfo.o commonCuda.o logger.o
 
 clean:
 	$(RM) *.o *.obj main nmsGpu nmsCpu generateBoxes \
-		cropResize cropResizeCpu loadNumpy mainMtcnn loggerSample test_common \
+		cropResizeGpu cropResizeCpu loadNumpy mainMtcnn loggerSample test_common \
 		test_trtNet trtNetMain

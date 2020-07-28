@@ -157,11 +157,13 @@ nmsCpu
 nmsGpu
 generateBoxes
 loadNumpy
-cropResize
+cropResizeGpu
 cropResizeCpu
 mainMtcnn
 loggerSample
 trtNetMain
+
+cropTest.jpg
 
 cuda/det/data/frzn/
 cuda/det/data/uff/
