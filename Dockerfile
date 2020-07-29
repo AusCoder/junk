@@ -75,8 +75,15 @@ RUN \
 
 RUN \
   apt install -y --no-install-recommends \
-    gdb \
-    libjsoncpp-dev
+    libjsoncpp-dev \
+    git \
+  && git clone https://github.com/bminor/binutils-gdb /opt/src/binutils-gdb \
+  && cd /opt/src/binutils-gdb \
+  && ./configure --prefix=/opt/gdb \
+  && make \
+  && make install \
+  && echo /opt/gdb/lib > /etc/ld.so.conf.d/gdb.conf \
+  && ldconfig
 
 ENV LC_ALL=C.UTF-8
 ENV OPENCV_LIB_DIR=/opt/opencv/install/lib
@@ -84,3 +91,4 @@ ENV OPENCV_INCLUDE_DIR=/opt/opencv/install/include/opencv4
 ENV PKG_CONFIG_PATH=/opt/opencv/install/lib/pkgconfig:$PKG_CONFIG_PATH
 ENV CUDA_INSTALL_DIR=/usr/local/cuda
 ENV TRT_INCLUDE_DIR=/usr/include/x86_64-linux-gnu
+ENV PATH=/opt/bin:$PATH

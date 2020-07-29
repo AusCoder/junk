@@ -30,6 +30,7 @@ public:
 
   void start();
 
+  // TODO: Handle maxBatchSize and batchSize
   void predict(const std::vector<float *> &inputs,
                const std::vector<float *> &outputs, int batchSize,
                cudaStream_t *stream);
@@ -44,6 +45,7 @@ public:
   static TrtNet createFromUffAndInfoFile(const std::string &uffPath);
 
 private:
+  bool isStarted = false;
   nvinfer1::IBuilder *builder = nullptr;
   nvinfer1::ICudaEngine *engine = nullptr;
   nvinfer1::IExecutionContext *context = nullptr;

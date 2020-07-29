@@ -84,6 +84,7 @@ void TrtNet::start() {
   std::cout << "Created ICudaEngine" << std::endl;
   network->destroy();
   parser->destroy();
+  isStarted = true;
 }
 
 // Predict using device pointers
@@ -91,6 +92,10 @@ void TrtNet::start() {
 void TrtNet::predict(const std::vector<float *> &inputs,
                      const std::vector<float *> &outputs, int batchSize,
                      cudaStream_t *stream) {
+  if (!isStarted) {
+    // TODO: better error type
+    throw std::invalid_argument("trtNet is not started");
+  }
   int numBuffers =
       trtNetInfo.inputTensorInfos.size() + trtNetInfo.outputTensorInfos.size();
   void *buffers[numBuffers];

@@ -191,6 +191,18 @@ void cropResizeCHW(const float *image, int imageWidth, int imageHeight,
       cropHeight, croppedResizedImages, croppedResizedImagesSize);
 }
 
+void cropResizeCHW(const float *image, int imageWidth, int imageHeight,
+  int depth, const float *boxes, int boxesSize, int cropWidth,
+  int cropHeight, float *croppedResizedImages,
+  int croppedResizedImagesSize, cudaStream_t *stream){
+    const int block = 1024;
+    const int grid = (croppedResizedImagesSize + block - 1) / block;
+
+    cropResizeCHWKernel<<<grid, block, 0, *stream>>>(
+        image, imageWidth, imageHeight, depth, boxes, boxesSize, cropWidth,
+        cropHeight, croppedResizedImages, croppedResizedImagesSize);
+  }
+
 void cropResizeHWC(const float *image, int imageWidth, int imageHeight,
     int depth, const float *boxes, int boxesSize, int cropWidth,
     int cropHeight, float *croppedResizedImages,
@@ -204,3 +216,15 @@ cropResizeHWCKernel<<<grid, block>>>(
 image, imageWidth, imageHeight, depth, boxes, boxesSize, cropWidth,
 cropHeight, croppedResizedImages, croppedResizedImagesSize);
 }
+
+void cropResizeHWC(const float *image, int imageWidth, int imageHeight,
+  int depth, const float *boxes, int boxesSize, int cropWidth,
+  int cropHeight, float *croppedResizedImages,
+  int croppedResizedImagesSize, cudaStream_t *stream) {
+    const int block = 1024;
+    const int grid = (croppedResizedImagesSize + block - 1) / block;
+
+    cropResizeHWCKernel<<<grid, block, 0, *stream>>>(
+    image, imageWidth, imageHeight, depth, boxes, boxesSize, cropWidth,
+    cropHeight, croppedResizedImages, croppedResizedImagesSize);
+    }

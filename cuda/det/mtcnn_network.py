@@ -12,6 +12,13 @@ DEFAULT_MIN_SIZE = 40
 DEFAULT_SCALE_FACTOR = 0.709
 
 
+def _debug_print_and_exit(arr):
+    print(arr.reshape(-1)[:10])
+    import sys
+
+    sys.exit(1)
+
+
 class MTCNN:
     def __init__(
         self,
@@ -23,6 +30,7 @@ class MTCNN:
         factor: float = DEFAULT_SCALE_FACTOR,
         min_face_magnitude: int = DEFAULT_MIN_SIZE,
         image_size: Optional[Tuple[int, int]] = None,
+        debug_input_output_dir: Optional[Path] = None,
     ):
         self.pnet = pnet
         self.rnet = rnet
@@ -31,6 +39,7 @@ class MTCNN:
         self.factor = factor
         self.min_face_magnitude = min_face_magnitude
         self.image_size = image_size
+        self.debug_input_output_dir = debug_input_output_dir
 
     def predict(self, rgb_image: np.ndarray):
         if rgb_image.dtype != np.float32:
@@ -39,15 +48,32 @@ class MTCNN:
             orig_h, orig_w, _ = rgb_image.shape
             resize_h, resize_w = self.image_size
             rgb_image = cv2.resize(
-                rgb_image, (resize_w, resize_h), interpolation=cv2.INTER_AREA
+                rgb_image, (resize_w, resize_h), interpolation=cv2.INTER_LINEAR
             )
 
         t1, t2, t3 = self.thresholds
         _, boxes = stage_one(
-            self.pnet, rgb_image, self.min_face_magnitude, self.factor, t1
+            self.pnet,
+            rgb_image,
+            self.min_face_magnitude,
+            self.factor,
+            t1,
+            debug_input_output_dir=self.debug_input_output_dir,
         )
-        _, boxes = stage_two(self.rnet, rgb_image, boxes, t2)
-        _, boxes, landmarks = stage_three(self.onet, rgb_image, boxes, t3)
+        _, boxes = stage_two(
+            self.rnet,
+            rgb_image,
+            boxes,
+            t2,
+            debug_input_output_dir=self.debug_input_output_dir,
+        )
+        _, boxes, landmarks = stage_three(
+            self.onet,
+            rgb_image,
+            boxes,
+            t3,
+            debug_input_output_dir=self.debug_input_output_dir,
+        )
         if self.image_size:
             shift_w = orig_w / resize_w
             shift_h = orig_h / resize_h
@@ -81,7 +107,14 @@ class MTCNN:
         )
 
 
-def stage_one(pnet, image, min_size, factor, threshold):
+def stage_one(
+    pnet,
+    image,
+    min_size,
+    factor,
+    threshold,
+    debug_input_output_dir: Optional[Path] = None,
+):
     image = image.astype(np.float32)
     image = (image - 127.5) / 128.0
     height, width, _ = image.shape
@@ -97,9 +130,18 @@ def stage_one(pnet, image, min_size, factor, threshold):
         resized_image = cv2.resize(
             image, (width_scaled, height_scaled), interpolation=cv2.INTER_AREA
         )
+        # print(resized_image.reshape(-1)[:10])
+        # import sys
+
+        # sys.exit(1)
 
         resized_image = resized_image.reshape((1, *resized_image.shape))
         prob, reg = pnet(resized_image)
+        # print(prob.reshape(-1)[:10])
+        # print(reg.reshape(-1)[:10])
+        # import sys
+
+        # sys.exit(1)
         prob = scipy.special.softmax(prob, axis=-1)
 
         (prob,) = prob
@@ -129,7 +171,9 @@ def stage_one(pnet, image, min_size, factor, threshold):
     return prob, bbox
 
 
-def stage_two(rnet, image, bbox, threshold):
+def stage_two(
+    rnet, image, bbox, threshold, debug_input_output_dir: Optional[Path] = None,
+):
     image = (image - 127.5) / 128
     target_size = (24, 24)
 
@@ -155,7 +199,9 @@ def stage_two(rnet, image, bbox, threshold):
     return prob, bbox
 
 
-def stage_three(onet, image, bbox, threshold):
+def stage_three(
+    onet, image, bbox, threshold, debug_input_output_dir: Optional[Path] = None,
+):
     image = (image - 127.5) / 128
     target_size = (48, 48)
 

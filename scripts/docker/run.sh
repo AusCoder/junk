@@ -16,14 +16,20 @@ else
   # Run docker
   # The security options are for gdb
   docker run \
+    --cap-add=SYS_PTRACE \
+    --security-opt seccomp=unconfined \
     --name $CONTAINER_NAME \
     -ti \
     --gpus=all \
-    --cap-add=SYS_PTRACE \
-    --security-opt seccomp:unconfined \
     --workdir /code/junk/cuda/det \
     -e "TERM=xterm-256color" \
     -v $(pwd):/code/junk \
     ${IMAGE_TAG} \
     /bin/zsh
 fi
+
+
+# Try the following:
+# https://github.com/bminor/binutils-gdb
+# ./configure --prefix=/opt/gdb
+# make && make install
