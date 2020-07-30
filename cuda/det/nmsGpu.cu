@@ -8,7 +8,7 @@
 #include <cuda_runtime.h>
 
 #include "commonCuda.h"
-#include "nmsKernel.h"
+#include "mtcnnKernels.h"
 
 using namespace std;
 
@@ -33,7 +33,7 @@ struct BBox {
 };
 
 int main(int argc, char **argv) {
-  float iouThreshold = 0.95;
+  float iouThreshold = 0.5;
 
   vector<BBox> bboxes;
   bboxes.emplace_back(0.1, 0.1, 0.2, 0.2);
@@ -52,7 +52,7 @@ int main(int argc, char **argv) {
     }
   );
 
-  vector<float> outBoxes(12);
+  vector<float> outBoxes(20);
 
   float *dBoxes;
   float *dOutBoxes;

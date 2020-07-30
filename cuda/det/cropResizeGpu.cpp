@@ -6,7 +6,7 @@ Kernel to crop and resize boxes from an image
 
 #include "common.h"
 #include "commonCuda.h"
-#include "cropResizeKernel.h"
+#include "mtcnnKernels.h"
 #include <opencv2/core.hpp>
 #include <opencv2/imgcodecs.hpp>
 

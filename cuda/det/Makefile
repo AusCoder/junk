@@ -6,19 +6,19 @@ NVCC = $(CUDA_INSTALL_DIR)/bin/nvcc
 NVFLAGS = -g -G -Xcompiler -Wall -Xcompiler -std=c++14
 
 mainMtcnn: mainMtcnn.o mtcnn.o trtNet.o trtNetInfo.o commonCuda.o logger.o \
-					 cropResizeKernel.obj mtcnnKernel.obj
+					mtcnnKernels.obj
 	$(CXX) $^ -o $@ $(LDFLAGS) $(LDLIBS)
 
 nmsCpu: nmsCpu.o
 	$(CXX) $^ -o $@ $(LDFLAGS) $(LDLIBS)
 
-nmsGpu: nmsGpu.obj nmsKernel.obj
+nmsGpu: nmsGpu.obj mtcnnKernels.obj
 	$(CXX) $^ -o $@ $(LDFLAGS) $(LDLIBS)
 
 generateBoxes: generateBoxes.obj
 	$(CXX) $^ -o $@ $(LDFLAGS) $(LDLIBS)
 
-cropResizeGpu: cropResizeGpu.o common.o cropResizeKernel.obj
+cropResizeGpu: cropResizeGpu.o common.o mtcnnKernels.obj
 	$(CXX) $^ -o $@ $(LDFLAGS) $(LDLIBS)
 
 cropResizeCpu: cropResizeCpu.o common.o

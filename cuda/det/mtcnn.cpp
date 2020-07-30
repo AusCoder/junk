@@ -12,8 +12,7 @@
 #include <string>
 
 #include "commonCuda.h"
-#include "cropResizeKernel.h"
-#include "mtcnnKernel.h"
+#include "mtcnnKernels.h"
 
 static std::map<std::pair<int, int>, TrtNet> createPnets() {
   std::vector<std::string> uffPaths{"data/uff/pnet_216x384.uff"};
@@ -174,18 +173,10 @@ void Mtcnn::stageOne(cv::Mat image, cudaStream_t *stream) {
     //     buffers.resizedImage, resizedHeightWidth.second,
     //     resizedHeightWidth.first, depth, "deviceResizedImage.jpg", stream);
 
-    // std::vector<float *> inputs{buffers.resizedImage};
-    // std::vector<float *> outputs{buffers.prob, buffers.reg};
-    // DEBUG_PRINT("prob: ", buffers.prob);
-    // DEBUG_PRINT("reg: ", buffers.reg);
     pnet.predict({buffers.resizedImage}, {buffers.prob, buffers.reg}, 1,
                  stream);
-
-    // debugPrintVals(buffers.prob, 10, 0, stream);
-    // debugPrintVals(buffers.reg, 10, 0, stream);
-
-    // debugPrintVals(dImage, 10, imageHeight * imageWidth * depth - 10,
-    // stream); CUDACHECK(cudaStreamSynchronize(*stream)); return;
+    debugPrintVals(buffers.prob, 10, 0, stream);
+    debugPrintVals(buffers.reg, 10, 0, stream);
 
     // Things might be different at this point. Want to verify:
     // - Original image is the same

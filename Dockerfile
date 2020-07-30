@@ -77,6 +77,7 @@ RUN \
   apt install -y --no-install-recommends \
     libjsoncpp-dev \
     git \
+    texinfo \
   && git clone https://github.com/bminor/binutils-gdb /opt/src/binutils-gdb \
   && cd /opt/src/binutils-gdb \
   && ./configure --prefix=/opt/gdb \
