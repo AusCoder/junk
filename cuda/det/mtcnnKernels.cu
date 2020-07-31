@@ -362,67 +362,78 @@ void cropResizeHWC(const float *image, int imageWidth, int imageHeight,
       cropHeight, croppedResizedImages, croppedResizedImagesSize);
 }
 
-// // DIM is going to be the blockSize, ie blockDim.x
-// // I have seen it templated for loop unrolling?
-// template <int TSIZE, int DIM>
-// __global__ void generateBoxesKernel(float *prob, int probSize,
-//                                     int *outIndices, int maxOutIndices) {
-//   // This is for a single element, ie a batch size of 1
-//   // I have seen nms code that uses one block per batch item
-//   // See nmsLayer.cu from TensorRT kernels
+// DIM is going to be the blockSize, ie blockDim.x
+// I have seen it templated for loop unrolling?
+template <int TSIZE, int DIM>
+__global__ void generateBoxesWithoutSoftmaxKernel(float *prob, int probSize,
+                                    int *outIndices, int maxOutIndices) {
+  // This is for a single element, ie a batch size of 1
+  // I have seen nms code that uses one block per batch item
+  // See nmsLayer.cu from TensorRT kernels
 
-//   // Prob thisThreadProbs[TSIZE];
+  // Prob thisThreadProbs[TSIZE];
+  float thisThreadProbs[2 * TSIZE];
 
-//   __shared__ int outIdx;
-//   if (threadIdx.z == 0 && threadIdx.y == 0 && threadIdx.x == 0) {
-//     outIdx = 0;
-//   }
+  __shared__ int outIdx;
+  if (threadIdx.z == 0 && threadIdx.y == 0 && threadIdx.x == 0) {
+    outIdx = 0;
+  }
 
-//   int probSize = probWidth * probHeight;
+  // int probSize = probWidth * probHeight;
 
-//   for (int i = 0; i < TSIZE; i++) {
-//     if (i * DIM + threadIdx.x < probSize) {
-//       thisThreadProbs[i] = prob[i * DIM + threadIdx.x];
-//     }
-//   }
+  for (int i = 0; i < TSIZE; i++) {
+    // if (i * DIM + threadIdx.x < probSize) {
+    if (i * DIM + threadIdx.x < probSize / 2) {
+      // thisThreadProbs[i] = prob[i * DIM + threadIdx.x];
+      thisThreadProbs[2 * i] = prob[2 * (i * DIM + threadIdx.x)];
+      thisThreadProbs[2 * i + 1] = prob[2 * (i * DIM + threadIdx.x) + 1];
+    }
+  }
 
-//   for (int i = 0; i < TSIZE; i++) {
+  for (int i = 0; i < TSIZE; i++) {
 
-//     for (int j = 0; j < DIM; j++) {
+    for (int j = 0; j < DIM; j++) {
 
-//       int offset = i * DIM;
-//       int index = offset + j;
-//       if (index >= probSize) {
-//         break;
-//       }
+      int offset = i * DIM;
+      int index = offset + j;
+      if (index >= probSize / 2) {
+        break;
+      }
 
-//       __syncthreads();
+      __syncthreads();
 
-//       if (threadIdx.x == j) {
-//         Prob p = thisThreadProbs[i];
-//         if (p.y > 0.95) {
-//           outIndices[outIdx] = index;
-//           printf("Gpu. index: %d. outIdx: %d\n", index, outIdx);
-//           outIdx++;
-//         }
-//       }
+      if (threadIdx.x == j) {
+        // Prob p = thisThreadProbs[i];
+        float p0 = thisThreadProbs[2 * i];
+        float p1 = thisThreadProbs[2 * i + 1];
 
-//       __syncthreads();
+        float softmax = p1 / (p0 + p1);  // fix this!
 
-//       if (outIdx == maxOutIndices) {
-//         return;
-//       }
-//     }
-//   }
-// }
+        // Compute softmax bit here
 
-// // assumes prob is of size width * height * 2
-// void generateBoxes(float *prob, int probSize,
-//   int *outIndices, int maxOutIndices) {
-//     int grid = 1;
-//     const int block = 1024;
-//     const int tsize = 60;
+        if (softmax > 0.95) {
+          outIndices[outIdx] = index;
+          printf("Gpu. index: %d. outIdx: %d\n", index, outIdx);
+          outIdx++;
+        }
+      }
 
-//     generateBoxesKernel<tsize, block>
-//         <<<grid, block>>>(prob, probSize, outIndices, maxOutIndices);
-//   }
+      __syncthreads();
+
+      if (outIdx == maxOutIndices) {
+        return;
+      }
+    }
+  }
+}
+
+// assumes prob is of size width * height * 2
+void generateBoxesWithoutSoftmax(float *prob, int probSize,
+  int *outIndices, int maxOutIndices) {
+    int grid = 1;
+    const int block = 1024;
+    const int tsize = 60;
+
+    generateBoxesWithoutSoftmaxKernel<tsize, block>
+        <<<grid, block>>>(prob, probSize, outIndices, maxOutIndices);
+  }

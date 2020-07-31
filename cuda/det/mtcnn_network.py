@@ -7,6 +7,8 @@ import cv2
 import scipy.special
 import numpy as np
 
+from mtcnn_utils import save_array, save_input_output
+
 
 DEFAULT_MIN_SIZE = 40
 DEFAULT_SCALE_FACTOR = 0.709
@@ -103,6 +105,7 @@ class MTCNN:
             KerasONet.default_model(
                 data_format=data_format, debug_input_output_dir=debug_input_output_dir
             ),
+            debug_input_output_dir=debug_input_output_dir,
             **kwargs,
         )
 
@@ -123,7 +126,9 @@ def stage_one(
     probs = []
     regs = []
     bboxs = []
-    for scale in scales:  # TODO: we can reduce the number of scales and save some time
+    for scale_idx, scale in enumerate(
+        scales
+    ):  # TODO: we can reduce the number of scales and save some time
         height_scaled, width_scaled = compute_height_width_at_scale(
             scale, height, width
         )
@@ -142,11 +147,26 @@ def stage_one(
         # import sys
 
         # sys.exit(1)
+
+        input_prob = prob
+        input_reg = reg
+
         prob = scipy.special.softmax(prob, axis=-1)
 
         (prob,) = prob
         (reg,) = reg
         prob, reg, bbox = generate_bounding_box(prob, reg, threshold, scale)
+
+        save_input_output(
+            debug_input_output_dir,
+            inputs=[input_prob, input_reg],
+            input_prefixes=[
+                f"generate-boxes_{scale_idx}_prob",
+                f"generate-boxes_{scale_idx}_reg",
+            ],
+            outputs=[bbox],
+            output_prefixes=[f"generate-boxes_{scale_idx}_output-boxes"],
+        )
 
         indices = nms_indices(bbox, prob, iou_threshold=0.5)
         prob = prob[indices]

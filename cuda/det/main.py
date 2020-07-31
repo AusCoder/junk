@@ -38,7 +38,7 @@ def _setup_logging():
 
 @click.group()
 def main():
-    pass
+    _setup_logging()
 
 
 @main.command()
@@ -58,8 +58,6 @@ def print_scales():
 
 @main.command()
 def save_uff():
-    _setup_logging()
-
     tf_outdir = Path.cwd().joinpath("data", "frzn")
     tf_outdir.mkdir(exist_ok=True, parents=True)
 

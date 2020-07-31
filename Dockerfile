@@ -73,17 +73,35 @@ RUN \
     click \
   && dpkg -i /opt/tensorrt/python/*-tf_*.deb
 
+RUN git clone https://github.com/bminor/binutils-gdb /opt/src/binutils-gdb
+
 RUN \
   apt install -y --no-install-recommends \
     libjsoncpp-dev \
     git \
     texinfo \
-  && git clone https://github.com/bminor/binutils-gdb /opt/src/binutils-gdb \
-  && cd /opt/src/binutils-gdb \
+    bison \
+    flex
+
+# Trying to compile gdb because I can't get breakpoints to work in docker
+# hbreak does seem to work though
+RUN \
+     cd /opt/src/binutils-gdb \
   && ./configure --prefix=/opt/gdb \
   && make \
   && make install \
   && echo /opt/gdb/lib > /etc/ld.so.conf.d/gdb.conf \
+  && ldconfig
+
+RUN \
+     git clone https://github.com/rogersce/cnpy /opt/src/cnpy \
+  && cd /opt/src/cnpy \
+  && mkdir build \
+  && cd build \
+  && cmake .. -DCMAKE_INSTALL_PREFIX=/opt/cnpy \
+  && make \
+  && make install \
+  && echo /opt/cnpy/lib > /etc/ld.so.conf.d/cnpy.conf \
   && ldconfig
 
 ENV LC_ALL=C.UTF-8
