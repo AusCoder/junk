@@ -362,11 +362,14 @@ void cropResizeHWC(const float *image, int imageWidth, int imageHeight,
       cropHeight, croppedResizedImages, croppedResizedImagesSize);
 }
 
+#define BOXES_STRIDE 2
+#define BOXES_CELL_SIZE 12
+
 // DIM is going to be the blockSize, ie blockDim.x
 // I have seen it templated for loop unrolling?
 template <int TSIZE, int DIM>
-__global__ void generateBoxesWithoutSoftmaxKernel(float *prob, int probSize,
-                                    int *outIndices, int maxOutIndices) {
+__global__ void generateBoxesWithoutSoftmaxKernel(float *prob, int probWidth, int probHeight,
+                                    int *outIndices, float *outBboxes, int maxOutIndices, float threshold, float scale) {
   // This is for a single element, ie a batch size of 1
   // I have seen nms code that uses one block per batch item
   // See nmsLayer.cu from TensorRT kernels
@@ -379,11 +382,11 @@ __global__ void generateBoxesWithoutSoftmaxKernel(float *prob, int probSize,
     outIdx = 0;
   }
 
-  // int probSize = probWidth * probHeight;
+  int probSize = probWidth * probHeight;
 
   for (int i = 0; i < TSIZE; i++) {
     // if (i * DIM + threadIdx.x < probSize) {
-    if (i * DIM + threadIdx.x < probSize / 2) {
+    if (i * DIM + threadIdx.x < probSize) {
       // thisThreadProbs[i] = prob[i * DIM + threadIdx.x];
       thisThreadProbs[2 * i] = prob[2 * (i * DIM + threadIdx.x)];
       thisThreadProbs[2 * i + 1] = prob[2 * (i * DIM + threadIdx.x) + 1];
@@ -396,7 +399,7 @@ __global__ void generateBoxesWithoutSoftmaxKernel(float *prob, int probSize,
 
       int offset = i * DIM;
       int index = offset + j;
-      if (index >= probSize / 2) {
+      if (index >= probSize) {
         break;
       }
 
@@ -407,13 +410,19 @@ __global__ void generateBoxesWithoutSoftmaxKernel(float *prob, int probSize,
         float p0 = thisThreadProbs[2 * i];
         float p1 = thisThreadProbs[2 * i + 1];
 
-        float softmax = p1 / (p0 + p1);  // fix this!
+        p0 = expf(p0);
+        p1 = expf(p1);
+        float softmax = p1 / (p0 + p1);
 
-        // Compute softmax bit here
-
-        if (softmax > 0.95) {
+        if (softmax > threshold) {
+          int x = index % probWidth;
+          int y = index / probWidth;
           outIndices[outIdx] = index;
-          printf("Gpu. index: %d. outIdx: %d\n", index, outIdx);
+          outBboxes[4 * outIdx + 0] = (x * BOXES_STRIDE + 1) / scale;
+          outBboxes[4 * outIdx + 1] = (y * BOXES_STRIDE + 1) / scale;
+          outBboxes[4 * outIdx + 2] = (x * BOXES_STRIDE + BOXES_CELL_SIZE) / scale;
+          outBboxes[4 * outIdx + 3] = (y * BOXES_STRIDE + BOXES_CELL_SIZE) / scale;
+          // printf("Gpu. index: %d. outIdx: %d\n", index, outIdx);
           outIdx++;
         }
       }
@@ -427,13 +436,15 @@ __global__ void generateBoxesWithoutSoftmaxKernel(float *prob, int probSize,
   }
 }
 
-// assumes prob is of size width * height * 2
-void generateBoxesWithoutSoftmax(float *prob, int probSize,
-  int *outIndices, int maxOutIndices) {
+// TODO: add a requiresSoftmax param here
+void generateBoxesWithoutSoftmax(float *prob, int probWidth, int probHeight,
+  int *outIndices, float *outBboxes,
+  int maxOutIndices, float threshold, float scale,
+  cudaStream_t *stream) {
     int grid = 1;
     const int block = 1024;
     const int tsize = 60;
 
     generateBoxesWithoutSoftmaxKernel<tsize, block>
-        <<<grid, block>>>(prob, probSize, outIndices, maxOutIndices);
+        <<<grid, block, 0, *stream>>>(prob, probWidth, probHeight, outIndices, outBboxes, maxOutIndices, threshold, scale);
   }

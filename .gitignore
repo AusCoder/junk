@@ -178,6 +178,7 @@ writeWebcam
 
 test_common
 test_trtNet
+test_mtcnnKernels
 
 *.o
 *.obj

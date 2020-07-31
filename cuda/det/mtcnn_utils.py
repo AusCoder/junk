@@ -19,7 +19,6 @@ def save_input_output(
     output_prefixes: Any,
     output_postfixes: Any = None,
 ) -> None:
-    assert debug_input_output_dir
     if debug_input_output_dir:
         debug_input_output_dir.mkdir(parents=True, exist_ok=True)
 

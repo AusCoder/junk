@@ -38,7 +38,15 @@ void cropResizeHWC(const float *image, int imageWidth, int imageHeight,
                    int cropHeight, float *croppedResizedImages,
                    int croppedResizedImagesSize, cudaStream_t *stream);
 
-void generateBoxesWithoutSoftmax(float *prob, int probSize, int *outIndices,
-                                 int maxOutIndices);
+/**
+ * Assumes outIndices has size >= maxOutIndices
+ * Assumes outBbox has size equal to 4 * outIndices size
+ *
+ * rename maxOutIndices to maxOutIndex? or outIndicesSize?
+ */
+void generateBoxesWithoutSoftmax(float *prob, int probWidth, int probHeight,
+                                 int *outIndices, float *outBboxes,
+                                 int maxOutIndices, float threshold,
+                                 float scale, cudaStream_t *stream);
 
 #endif
