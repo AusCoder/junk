@@ -104,6 +104,12 @@ RUN \
   && echo /opt/cnpy/lib > /etc/ld.so.conf.d/cnpy.conf \
   && ldconfig
 
+RUN \
+     cd /opt/src \
+  && wget https://github.com/NVlabs/cub/archive/1.8.0.zip \
+  && unzip 1.8.0.zip \
+  && mv cub-1.8.0 ../cub
+
 ENV LC_ALL=C.UTF-8
 ENV OPENCV_LIB_DIR=/opt/opencv/install/lib
 ENV OPENCV_INCLUDE_DIR=/opt/opencv/install/include/opencv4

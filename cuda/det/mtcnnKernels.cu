@@ -1,6 +1,7 @@
 #include "mtcnnKernels.h"
 #include <cassert>
 #include <cstdio>
+#include <cub/cub.cuh>
 
 __global__ void normalizePixelsKernel(float *image, size_t imageSize) {
   int i = threadIdx.x + blockIdx.x * blockDim.x;
@@ -45,6 +46,20 @@ void debugPrintVals(float *image, size_t numVals, size_t offset,
   debugPrintValsKernel<<<grid, block, 0, *stream>>>(image, numVals, offset);
 }
 
+__global__ void debugPrintValsKernel(int *values, size_t numVals,
+                                     size_t offset) {
+  int i = threadIdx.x;
+  printf("%d: %d\n", i, values[offset + i]);
+}
+
+void debugPrintVals(int *values, size_t numVals, size_t offset,
+                    cudaStream_t *stream) {
+  assert(numVals < 1024);
+  const int block = numVals;
+  const int grid = 1;
+  debugPrintValsKernel<<<grid, block, 0, *stream>>>(values, numVals, offset);
+}
+
 // Question: Is it safe to cast float * to a BBox *?
 // Answer: I don't think it is
 struct BBox {
@@ -75,17 +90,19 @@ __device__ float calculateIou(const BBox &box1, const BBox &box2) {
 }
 
 template <int DIM>
-__global__ void nmsSimpleKernel(float *boxes, size_t boxesSize, float *outBoxes,
-                                size_t outBoxesSize, float iouThreshold) {
+__launch_bounds__(DIM) __global__
+    void nmsSimpleKernel(float *boxes, size_t boxesSize, float *outBoxes,
+                         size_t outBoxesSize, float iouThreshold) {
   // This runs off 1 block of size DIM
   // Assumes that the boxes are sorted desc by score
+  // inpractice we need to sort the boxes by probability score
 
   // Max number of boxes we can nms with this is DIM
   __shared__ bool keptBoxes[DIM];
   int maxBoxIdx = boxesSize / 4;
   int outBoxIdx = 0;
   int curBoxIdx = threadIdx.x;
-  BBox curBox;                 // this threads box
+  BBox curBox; // this threads box
 
   if (curBoxIdx < maxBoxIdx) {
     curBox = BBox{boxes[4 * curBoxIdx], boxes[4 * curBoxIdx + 1],
@@ -97,7 +114,7 @@ __global__ void nmsSimpleKernel(float *boxes, size_t boxesSize, float *outBoxes,
 
   int refBoxIdx = 0;
 
-  while ((refBoxIdx < maxBoxIdx) && (outBoxIdx < outBoxesSize)) {
+  while ((refBoxIdx < maxBoxIdx) && (outBoxIdx < outBoxesSize / 4)) {
     BBox refBox{boxes[4 * refBoxIdx], boxes[4 * refBoxIdx + 1],
                 boxes[4 * refBoxIdx + 2], boxes[4 * refBoxIdx + 3]};
 
@@ -131,6 +148,124 @@ void nmsSimple(float *boxes, size_t boxesSize, float *outBoxes,
       <<<grid, block>>>(boxes, boxesSize, outBoxes, outBoxesSize, iouThreshold);
 }
 
+template <int BLOCK_THREADS, int ITEMS_PER_THREAD>
+__launch_bounds__(BLOCK_THREADS) __global__
+    void sortProb(float *prob, size_t probSize, int *outIndices,
+                  size_t outIndicesSize) {
+  typedef cub::BlockLoad<float, BLOCK_THREADS, ITEMS_PER_THREAD> BlockLoad;
+  typedef cub::BlockRadixSort<float, BLOCK_THREADS, ITEMS_PER_THREAD, int>
+      BlockRadixSort;
+  typedef cub::BlockStore<int, BLOCK_THREADS, ITEMS_PER_THREAD> BlockStore;
+
+  __shared__ union TempStorage {
+    typename BlockLoad::TempStorage keys;
+    typename BlockRadixSort::TempStorage sort;
+    typename BlockStore::TempStorage store;
+  } tempStorage;
+
+  float threadKeys[ITEMS_PER_THREAD];
+  int threadValues[ITEMS_PER_THREAD];
+  BlockLoad(tempStorage.keys).Load(prob, threadKeys, probSize, -1);
+
+  for (int i = 0; i < ITEMS_PER_THREAD; i++) {
+    threadValues[i] = threadIdx.x * ITEMS_PER_THREAD + i;
+  }
+  __syncthreads();
+  BlockRadixSort(tempStorage.sort).SortDescending(threadKeys, threadValues);
+  __syncthreads();
+  BlockStore(tempStorage.store).Store(outIndices, threadValues, outIndicesSize);
+}
+
+template <int BLOCK_THREADS>
+__launch_bounds__(BLOCK_THREADS) __global__
+    void nmsKernel(int *sortOrder, size_t sortOrderSize, float *prob,
+                   size_t probSize, float *reg, size_t regSize, float *boxes,
+                   size_t boxesSize, float *outProb, size_t outProbSize,
+                   float *outReg, size_t outRegSize, float *outBoxes,
+                   size_t outBoxesSize, float iouThreshold) {
+  // rename maxBoxIdx to boxIdxsSize? It's not an index, it's a size
+  int maxBoxIdx = boxesSize / 4;
+  assert(maxBoxIdx <= BLOCK_THREADS);
+  assert(outRegSize == 4 * outProbSize);
+  assert(outBoxesSize == 4 * outProbSize);
+
+  __shared__ bool keptBoxes[BLOCK_THREADS];
+
+  // int curBoxIdx = threadIdx.x;
+  // int curBoxIdx = sortOrder[threadIdx.x];
+  int curBoxSortIdx = threadIdx.x;
+  int curBoxIdx = sortOrder[curBoxSortIdx];
+  BBox curBox; // this threads box
+
+  if (curBoxSortIdx < maxBoxIdx) {
+    curBox = BBox{boxes[4 * curBoxIdx], boxes[4 * curBoxIdx + 1],
+                  boxes[4 * curBoxIdx + 2], boxes[4 * curBoxIdx + 3]};
+    keptBoxes[curBoxSortIdx] = true;
+  } else {
+    keptBoxes[curBoxSortIdx] = false;
+  }
+
+  int outIdx = 0;
+  // int refBoxIdx = 0;
+  // int refBoxIdx = sortOrder[0];  // something like this
+  int refBoxSortIdx = 0;
+
+  while ((refBoxSortIdx < maxBoxIdx) && (outIdx < outProbSize)) {
+    int refBoxIdx = sortOrder[refBoxSortIdx];
+    BBox refBox{boxes[4 * refBoxIdx], boxes[4 * refBoxIdx + 1],
+                boxes[4 * refBoxIdx + 2], boxes[4 * refBoxIdx + 3]};
+
+    if (curBoxSortIdx > refBoxSortIdx) {
+      if (calculateIou(refBox, curBox) > iouThreshold) {
+        keptBoxes[curBoxSortIdx] = false;
+      }
+    } else if (curBoxSortIdx == refBoxSortIdx) {
+      outProb[outIdx] = prob[refBoxIdx];
+      outReg[4 * outIdx + 0] = reg[4 * refBoxIdx + 0];
+      outReg[4 * outIdx + 1] = reg[4 * refBoxIdx + 1];
+      outReg[4 * outIdx + 2] = reg[4 * refBoxIdx + 2];
+      outReg[4 * outIdx + 3] = reg[4 * refBoxIdx + 3];
+      outBoxes[4 * outIdx + 0] = refBox.xMin;
+      outBoxes[4 * outIdx + 1] = refBox.yMin;
+      outBoxes[4 * outIdx + 2] = refBox.xMax;
+      outBoxes[4 * outIdx + 3] = refBox.yMax;
+
+      // outIndices[outIdx] = refboxIdx;
+
+      // outBoxes[4 * outIdx] = refBox.xMin;
+      // outBoxes[4 * outIdx + 1] = refBox.yMin;
+      // outBoxes[4 * outIdx + 2] = refBox.xMax;
+      // outBoxes[4 * outIdx + 3] = refBox.yMax;
+    }
+
+    // Make sure the keptBoxes are in sync at this point
+    __syncthreads();
+
+    do {
+      refBoxSortIdx += 1;
+    } while (!keptBoxes[refBoxSortIdx] && refBoxSortIdx < maxBoxIdx);
+
+    outIdx += 1;
+  }
+
+  __syncthreads();
+  // if (threadIdx.x == 0) {
+  // printf("nms kernel in thread %d outIdx %d\n", threadIdx.x, outIdx);
+  // }
+}
+
+void nms(float *prob, size_t probSize, float *reg, size_t regSize, float *boxes,
+         size_t boxesSize, int *sortIndices, size_t sortIndicesSize,
+         float *outProb, size_t outProbSize, float *outReg, size_t outRegSize,
+         float *outBoxes, size_t outBoxesSize, float iouThreshold,
+         cudaStream_t *stream) {
+  sortProb<128, 8><<<1, 128, 0, *stream>>>(prob, probSize, sortIndices,
+                                           sortIndicesSize);
+  nmsKernel<512><<<1, 512, 0, *stream>>>(
+      sortIndices, sortIndicesSize, prob, probSize, reg, regSize,
+      boxes, boxesSize, outProb, outProbSize, outReg, outRegSize, outBoxes,
+      outBoxesSize, iouThreshold);
+}
 // blockSize will be {1024, 1, 1}
 // gridSize...
 __global__ void
@@ -367,9 +502,11 @@ void cropResizeHWC(const float *image, int imageWidth, int imageHeight,
 
 // DIM is going to be the blockSize, ie blockDim.x
 // I have seen it templated for loop unrolling?
+// TODO: Get rid of this
 template <int TSIZE, int DIM>
-__global__ void generateBoxesWithoutSoftmaxKernel(float *prob, int probWidth, int probHeight,
-                                    int *outIndices, float *outBboxes, int maxOutIndices, float threshold, float scale) {
+__global__ void generateBoxesWithoutSoftmaxIndicesKernel(
+    float *prob, int probWidth, int probHeight, int *outIndices,
+    float *outBboxes, int maxOutIndices, float threshold, float scale) {
   // This is for a single element, ie a batch size of 1
   // I have seen nms code that uses one block per batch item
   // See nmsLayer.cu from TensorRT kernels
@@ -420,8 +557,10 @@ __global__ void generateBoxesWithoutSoftmaxKernel(float *prob, int probWidth, in
           outIndices[outIdx] = index;
           outBboxes[4 * outIdx + 0] = (x * BOXES_STRIDE + 1) / scale;
           outBboxes[4 * outIdx + 1] = (y * BOXES_STRIDE + 1) / scale;
-          outBboxes[4 * outIdx + 2] = (x * BOXES_STRIDE + BOXES_CELL_SIZE) / scale;
-          outBboxes[4 * outIdx + 3] = (y * BOXES_STRIDE + BOXES_CELL_SIZE) / scale;
+          outBboxes[4 * outIdx + 2] =
+              (x * BOXES_STRIDE + BOXES_CELL_SIZE) / scale;
+          outBboxes[4 * outIdx + 3] =
+              (y * BOXES_STRIDE + BOXES_CELL_SIZE) / scale;
           // printf("Gpu. index: %d. outIdx: %d\n", index, outIdx);
           outIdx++;
         }
@@ -436,15 +575,113 @@ __global__ void generateBoxesWithoutSoftmaxKernel(float *prob, int probWidth, in
   }
 }
 
-// TODO: add a requiresSoftmax param here
-void generateBoxesWithoutSoftmax(float *prob, int probWidth, int probHeight,
-  int *outIndices, float *outBboxes,
-  int maxOutIndices, float threshold, float scale,
-  cudaStream_t *stream) {
-    int grid = 1;
-    const int block = 1024;
-    const int tsize = 60;
+void generateBoxesWithoutSoftmaxIndices(float *prob, int probWidth,
+                                        int probHeight, int *outIndices,
+                                        float *outBboxes, int maxOutIndices,
+                                        float threshold, float scale,
+                                        cudaStream_t *stream) {
+  int grid = 1;
+  const int block = 1024;
+  const int tsize = 60;
 
-    generateBoxesWithoutSoftmaxKernel<tsize, block>
-        <<<grid, block, 0, *stream>>>(prob, probWidth, probHeight, outIndices, outBboxes, maxOutIndices, threshold, scale);
+  generateBoxesWithoutSoftmaxIndicesKernel<tsize, block>
+      <<<grid, block, 0, *stream>>>(prob, probWidth, probHeight, outIndices,
+                                    outBboxes, maxOutIndices, threshold, scale);
+}
+
+// DIM is going to be the blockSize, ie blockDim.x
+// I have seen it templated for loop unrolling?
+template <int TSIZE, int DIM>
+__global__ void generateBoxesWithoutSoftmaxKernel(
+    float *prob, int probWidth, int probHeight, float *reg, int regWidth,
+    int regHeight, float *outProb, float *outReg, float *outBboxes,
+    int maxOutputBoxes, float threshold, float scale) {
+  // This is for a single element, ie a batch size of 1
+  // I have seen nms code that uses one block per batch item
+  // See nmsLayer.cu from TensorRT kernels
+
+  float thisThreadProbs[2 * TSIZE];
+
+  __shared__ int outIdx;
+  if (threadIdx.z == 0 && threadIdx.y == 0 && threadIdx.x == 0) {
+    outIdx = 0;
   }
+
+  assert(probWidth == regWidth);
+  assert(probHeight == regHeight);
+  int probSize = probWidth * probHeight;
+
+  for (int i = 0; i < TSIZE; i++) {
+    if (i * DIM + threadIdx.x < probSize) {
+      thisThreadProbs[2 * i] = prob[2 * (i * DIM + threadIdx.x)];
+      thisThreadProbs[2 * i + 1] = prob[2 * (i * DIM + threadIdx.x) + 1];
+    }
+  }
+
+  for (int i = 0; i < TSIZE; i++) {
+
+    for (int j = 0; j < DIM; j++) {
+
+      int offset = i * DIM;
+      int index = offset + j;
+      if (index >= probSize) {
+        break;
+      }
+
+      __syncthreads();
+
+      if (threadIdx.x == j) {
+        // Prob p = thisThreadProbs[i];
+        float p0 = thisThreadProbs[2 * i];
+        float p1 = thisThreadProbs[2 * i + 1];
+
+        p0 = expf(p0);
+        p1 = expf(p1);
+        float softmax = p1 / (p0 + p1);
+
+        if (softmax > threshold) {
+          int x = index % probWidth;
+          int y = index / probWidth;
+          // filter prob and reg
+          outProb[outIdx] = softmax;
+          outReg[4 * outIdx + 0] = reg[4 * outIdx + 0];
+          outReg[4 * outIdx + 1] = reg[4 * outIdx + 1];
+          outReg[4 * outIdx + 2] = reg[4 * outIdx + 2];
+          outReg[4 * outIdx + 3] = reg[4 * outIdx + 3];
+          // create output bounding box
+          outBboxes[4 * outIdx + 0] = (x * BOXES_STRIDE + 1) / scale;
+          outBboxes[4 * outIdx + 1] = (y * BOXES_STRIDE + 1) / scale;
+          outBboxes[4 * outIdx + 2] =
+              (x * BOXES_STRIDE + BOXES_CELL_SIZE) / scale;
+          outBboxes[4 * outIdx + 3] =
+              (y * BOXES_STRIDE + BOXES_CELL_SIZE) / scale;
+          // printf("Gpu. index: %d. outIdx: %d\n", index, outIdx);
+          outIdx++;
+        }
+      }
+
+      __syncthreads();
+
+      if (outIdx == maxOutputBoxes) {
+        return;
+      }
+    }
+  }
+  // __syncthreads();
+  // printf("generate boxes thread %d outIdx %d\n", threadIdx.x, outIdx);
+}
+
+void generateBoxesWithoutSoftmax(float *prob, int probWidth, int probHeight,
+                                 float *reg, int regWidth, int regHeight,
+                                 float *outProb, float *outReg,
+                                 float *outBboxes, int maxOutputBoxes,
+                                 float threshold, float scale,
+                                 cudaStream_t *stream) {
+  int grid = 1;
+  const int block = 1024;
+  const int tsize = 60;
+
+  generateBoxesWithoutSoftmaxKernel<tsize, block><<<grid, block, 0, *stream>>>(
+      prob, probWidth, probHeight, reg, regWidth, regHeight, outProb, outReg,
+      outBboxes, maxOutputBoxes, threshold, scale);
+}

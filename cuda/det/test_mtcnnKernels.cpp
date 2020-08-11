@@ -3,91 +3,71 @@
 #include "catch.hpp"
 #include "cnpy.h"
 #include "commonCuda.h"
+#include "kernelTestHarness.hpp"
 #include "mtcnnKernels.h"
 
 #include <algorithm>
 #include <iostream>
+#include <tuple>
 #include <utility>
 #include <vector>
 
 #define TOLERANCE 0.0001
 
-std::pair<std::vector<int>, std::vector<float>>
+std::tuple<std::vector<float>, std::vector<float>, std::vector<float>>
 runGenerateBoxes(const std::vector<float> &prob, const std::vector<float> &reg,
                  int probWidth, int probHeight, float threshold, float scale) {
-  std::vector<int> outIndices(200);
-  size_t outIndicesSize = outIndices.size();
-  std::fill(outIndices.begin(), outIndices.end(), -1);
-  std::vector<float> outBboxes(4 * outIndicesSize);
-  size_t outBboxesSize = outBboxes.size();
+  int maxOutputBoxes = 200;
+  std::vector<float> outProb(maxOutputBoxes);
+  std::vector<float> outReg(4 * maxOutputBoxes);
+  std::vector<float> outBbox(4 * maxOutputBoxes);
 
-  size_t probSize = probWidth * probHeight * 2;
-  assert(probSize == prob.size());
-  size_t regSize = prob.size();
+  // std::vector<int> outIndices(200);
+  // size_t outIndicesSize = outIndices.size();
+  // std::fill(outIndices.begin(), outIndices.end(), -1);
+  // std::vector<float> outBboxes(4 * outIndicesSize);
+  // size_t outBboxesSize = outBboxes.size();
 
-  float *dProb;
-  float *dReg;
-  int *dOutIndices;
-  float *dOutBboxes;
+  assert(probWidth * probHeight * 2 == prob.size());
 
-  // TODO: Create a test case object where these allocations happen in cstors,
-  // dstors etc
-  cudaStream_t stream;
-  CUDACHECK(cudaStreamCreate(&stream));
-  CUDACHECK(
-      cudaMalloc(reinterpret_cast<void **>(&dProb), sizeof(float) * probSize));
-  CUDACHECK(
-      cudaMalloc(reinterpret_cast<void **>(&dReg), sizeof(float) * regSize));
-  CUDACHECK(cudaMalloc(reinterpret_cast<void **>(&dOutIndices),
-                       sizeof(int) * outIndicesSize));
-  CUDACHECK(cudaMalloc(reinterpret_cast<void **>(&dOutBboxes),
-                       sizeof(float) * outBboxesSize));
+  KernelTestHarness harness;
+  harness.addInput(prob);
+  harness.addInput(reg);
+  harness.addOutput(outProb);
+  harness.addOutput(outReg);
+  harness.addOutput(outBbox);
 
-  CUDACHECK(cudaMemcpyAsync(
-      static_cast<void *>(dProb), static_cast<const void *>(prob.data()),
-      sizeof(float) * probSize, cudaMemcpyHostToDevice, stream));
-  CUDACHECK(cudaMemcpyAsync(
-      static_cast<void *>(dReg), static_cast<const void *>(reg.data()),
-      sizeof(float) * regSize, cudaMemcpyHostToDevice, stream));
-  CUDACHECK(cudaMemcpyAsync(static_cast<void *>(dOutIndices),
-                            static_cast<const void *>(outIndices.data()),
-                            sizeof(float) * outIndicesSize,
-                            cudaMemcpyHostToDevice, stream));
+  generateBoxesWithoutSoftmax(harness.getInput<float>(0), probWidth, probHeight,
+                              harness.getInput<float>(1), probWidth, probHeight,
+                              harness.getOutput<float>(0),
+                              harness.getOutput<float>(1),
+                              harness.getOutput<float>(2), maxOutputBoxes,
+                              threshold, scale, &harness.getStream());
 
-  generateBoxesWithoutSoftmax(dProb, probWidth, probHeight, dOutIndices,
-                              dOutBboxes, outIndicesSize, threshold, scale,
-                              &stream);
+  harness.copyOutput(0, outProb);
+  harness.copyOutput(1, outReg);
+  harness.copyOutput(2, outBbox);
 
-  CUDACHECK(cudaMemcpyAsync(
-      static_cast<void *>(outIndices.data()), static_cast<void *>(dOutIndices),
-      sizeof(float) * outIndicesSize, cudaMemcpyDeviceToHost, stream));
-  CUDACHECK(cudaMemcpyAsync(
-      static_cast<void *>(outBboxes.data()), static_cast<void *>(dOutBboxes),
-      sizeof(float) * outBboxesSize, cudaMemcpyDeviceToHost, stream));
-  CUDACHECK(cudaStreamSynchronize(stream));
-
-  CUDACHECK(cudaFree(static_cast<void *>(dProb)));
-  CUDACHECK(cudaFree(static_cast<void *>(dReg)));
-  CUDACHECK(cudaStreamDestroy(stream));
-
-  return {outIndices, outBboxes};
+  return {outProb, outReg, outBbox};
 }
 
-// NB: expected outputs can be generated with
-//  python main.py run-keras --debug-input-output-dir data/test-input-output
 TEST_CASE("mtcnnKernels - generateBoxes") {
   cnpy::NpyArray probArray = cnpy::npy_load(
       "data/test-input-output/generate-boxes_0_prob_1-103-187-2.npy");
   cnpy::NpyArray regArray = cnpy::npy_load(
       "data/test-input-output/generate-boxes_0_reg_1-103-187-4.npy");
+  cnpy::NpyArray expectedOutputProbArray = cnpy::npy_load(
+      "data/test-input-output/generate-boxes_0_output-prob_190.npy");
+  cnpy::NpyArray expectedOutputRegArray = cnpy::npy_load(
+      "data/test-input-output/generate-boxes_0_output-reg_190-4.npy");
   cnpy::NpyArray expectedOutputBoxesArray = cnpy::npy_load(
       "data/test-input-output/generate-boxes_0_output-boxes_190-4.npy");
 
-  std::vector<double> expectedOutBoxes_d =
-      expectedOutputBoxesArray.as_vec<double>();
-  // Range cstor
-  std::vector<float> expectedOutBoxes{expectedOutBoxes_d.begin(),
-                                      expectedOutBoxes_d.end()};
+  std::vector<float> expectedOutProb = expectedOutputProbArray.as_vec<float>();
+  std::vector<float> expectedOutReg = expectedOutputRegArray.as_vec<float>();
+  std::vector<float> expectedOutBoxes =
+      expectedOutputBoxesArray.as_vec<float>();
+
   std::vector<size_t> expectedOutBoxesShape = expectedOutputBoxesArray.shape;
 
   int probWidth = 187;
@@ -99,19 +79,19 @@ TEST_CASE("mtcnnKernels - generateBoxes") {
   auto output =
       runGenerateBoxes(probArray.as_vec<float>(), regArray.as_vec<float>(),
                        probWidth, probHeight, threshold, scale);
-  auto &outIndices = output.first;
-  auto &outBboxes = output.second;
+  auto &outProb = std::get<0>(output);
+  auto &outReg = std::get<1>(output);
+  auto &outBboxes = std::get<2>(output);
 
-  size_t indexCount = 0;
-  std::for_each(outIndices.begin(), outIndices.end(),
-                [&indexCount](int idx) -> void {
-                  if (idx > -1) {
-                    indexCount++;
-                  }
-                });
-  REQUIRE(indexCount == expectedOutBoxesShape.at(0));
-
-  for (size_t i = 0; i < expectedOutBoxes.size(); i++) {
+  for (size_t i = 0; i < std::min(expectedOutProb.size(), outProb.size());
+       i++) {
+    REQUIRE(abs(expectedOutProb.at(i) - outProb.at(i)) < TOLERANCE);
+  }
+  for (size_t i = 0; i < std::min(expectedOutReg.size(), outReg.size()); i++) {
+    REQUIRE(abs(expectedOutReg.at(i) - outReg.at(i)) < TOLERANCE);
+  }
+  for (size_t i = 0; i < std::min(expectedOutBoxes.size(), outBboxes.size());
+       i++) {
     REQUIRE(abs(expectedOutBoxes.at(i) - outBboxes.at(i)) < TOLERANCE);
   }
 }

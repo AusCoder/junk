@@ -29,18 +29,44 @@ static std::map<std::pair<int, int>, TrtNet> createPnets() {
 
 // TODO: move to a MtcnnPnetBuffers cstor
 static MtcnnPnetBuffers allocatePnetBuffers(int batchSize,
+                                            int maxBoxesToGenerate,
                                             const TrtNetInfo &netInfo) {
   MtcnnPnetBuffers pnetBuffers;
   // TODO: write these buffer sizes somewhere too for checking
-  CUDACHECK(cudaMalloc((void **)&pnetBuffers.resizedImage,
+  CUDACHECK(cudaMalloc(reinterpret_cast<void **>(&pnetBuffers.resizedImage),
                        sizeof(float) * batchSize *
                            netInfo.inputTensorInfos[0].volume()));
-  CUDACHECK(cudaMalloc((void **)&pnetBuffers.prob,
+  CUDACHECK(cudaMalloc(reinterpret_cast<void **>(&pnetBuffers.prob),
                        sizeof(float) * batchSize *
                            netInfo.outputTensorInfos[0].volume()));
-  CUDACHECK(cudaMalloc((void **)&pnetBuffers.reg,
+  CUDACHECK(cudaMalloc(reinterpret_cast<void **>(&pnetBuffers.reg),
                        sizeof(float) * batchSize *
                            netInfo.outputTensorInfos[1].volume()));
+  CUDACHECK(cudaMalloc(
+      reinterpret_cast<void **>(&pnetBuffers.generateBoxesOutputProb),
+      sizeof(float) * maxBoxesToGenerate));
+  pnetBuffers.generateBoxesOutputProbSize = maxBoxesToGenerate;
+  CUDACHECK(
+      cudaMalloc(reinterpret_cast<void **>(&pnetBuffers.generateBoxesOutputReg),
+                 sizeof(float) * 4 * maxBoxesToGenerate));
+  pnetBuffers.generateBoxesOutputRegSize = 4 * maxBoxesToGenerate;
+  CUDACHECK(cudaMalloc(
+      reinterpret_cast<void **>(&pnetBuffers.generateBoxesOutputBoxes),
+      sizeof(float) * 4 * maxBoxesToGenerate));
+  pnetBuffers.generateBoxesOutputBoxesSize = 4 * maxBoxesToGenerate;
+
+  CUDACHECK(cudaMalloc(reinterpret_cast<void **>(&pnetBuffers.nmsSortIndices),
+                       sizeof(int) * maxBoxesToGenerate));
+  pnetBuffers.nmsSortIndicesSize = maxBoxesToGenerate;
+  CUDACHECK(cudaMalloc(reinterpret_cast<void **>(&pnetBuffers.nmsOutputProb),
+                       sizeof(float) * maxBoxesToGenerate));
+  pnetBuffers.nmsOutputProbSize = maxBoxesToGenerate;
+  CUDACHECK(cudaMalloc(reinterpret_cast<void **>(&pnetBuffers.nmsOutputReg),
+                       sizeof(float) * 4 * maxBoxesToGenerate));
+  pnetBuffers.nmsOutputRegSize = 4 * maxBoxesToGenerate;
+  CUDACHECK(cudaMalloc(reinterpret_cast<void **>(&pnetBuffers.nmsOutputBoxes),
+                       sizeof(float) * 4 * maxBoxesToGenerate));
+  pnetBuffers.nmsOutputBoxesSize = 4 * maxBoxesToGenerate;
   return pnetBuffers;
 }
 
@@ -78,15 +104,17 @@ Mtcnn::Mtcnn(cudaStream_t *stream) : pnets{createPnets()} {
   std::transform(
       netInfos.begin(), netInfos.end(),
       std::inserter(pnetBuffers, pnetBuffers.begin()),
-      [](auto &netInfo) -> std::pair<std::pair<int, int>, MtcnnPnetBuffers> {
-        return {netInfo.first, allocatePnetBuffers(1, netInfo.second)};
+      [this](
+          auto &netInfo) -> std::pair<std::pair<int, int>, MtcnnPnetBuffers> {
+        return {netInfo.first,
+                allocatePnetBuffers(1, maxBoxesToGenerate, netInfo.second)};
       });
   std::for_each(pnets.begin(), pnets.end(),
                 [](auto &net) -> void { net.second.start(); });
 
-  CUDACHECK(cudaMalloc((void **)&dImage, sizeof(float) * requiredImageHeight *
-                                             requiredImageWidth *
-                                             requiredImageDepth));
+  CUDACHECK(cudaMalloc(reinterpret_cast<void **>(&dImage),
+                       sizeof(float) * requiredImageHeight *
+                           requiredImageWidth * requiredImageDepth));
   CUDACHECK(cudaMalloc(reinterpret_cast<void **>(&dImageResizeBox),
                        sizeof(float) * dImageResizeBoxSize));
   std::vector<float> imageResizeBox{0.0, 0.0, 1.0, 1.0};
@@ -100,10 +128,18 @@ Mtcnn::Mtcnn(cudaStream_t *stream) : pnets{createPnets()} {
 Mtcnn::~Mtcnn() {
   CUDACHECK(cudaFree(dImage));
   CUDACHECK(cudaFree(dImageResizeBox));
+
   for (auto &buffers : pnetBuffers) {
     CUDACHECK(cudaFree(buffers.second.resizedImage));
     CUDACHECK(cudaFree(buffers.second.prob));
     CUDACHECK(cudaFree(buffers.second.reg));
+    CUDACHECK(cudaFree(buffers.second.generateBoxesOutputProb));
+    CUDACHECK(cudaFree(buffers.second.generateBoxesOutputReg));
+    CUDACHECK(cudaFree(buffers.second.generateBoxesOutputBoxes));
+    CUDACHECK(cudaFree(buffers.second.nmsSortIndices));
+    CUDACHECK(cudaFree(buffers.second.nmsOutputProb));
+    CUDACHECK(cudaFree(buffers.second.nmsOutputReg));
+    CUDACHECK(cudaFree(buffers.second.nmsOutputBoxes));
   }
 }
 
@@ -175,8 +211,30 @@ void Mtcnn::stageOne(cv::Mat image, cudaStream_t *stream) {
 
     pnet.predict({buffers.resizedImage}, {buffers.prob, buffers.reg}, 1,
                  stream);
-    debugPrintVals(buffers.prob, 10, 0, stream);
-    debugPrintVals(buffers.reg, 10, 0, stream);
+
+    auto &outputTensorInfos = pnet.getTrtNetInfo().outputTensorInfos;
+    int probWidth = outputTensorInfos.at(0).getWidth();
+    int probHeight = outputTensorInfos.at(0).getHeight();
+    int regWidth = outputTensorInfos.at(1).getWidth();
+    int regHeight = outputTensorInfos.at(1).getHeight();
+
+    generateBoxesWithoutSoftmax(
+        buffers.prob, probWidth, probHeight, buffers.reg, regWidth, regHeight,
+        buffers.generateBoxesOutputProb, buffers.generateBoxesOutputReg,
+        buffers.generateBoxesOutputBoxes, maxBoxesToGenerate, threshold1, scale,
+        stream);
+
+    float iouThreshold = 0.5;
+    nms(buffers.generateBoxesOutputProb, buffers.generateBoxesOutputProbSize,
+        buffers.generateBoxesOutputReg, buffers.generateBoxesOutputRegSize,
+        buffers.generateBoxesOutputBoxes, buffers.generateBoxesOutputBoxesSize,
+        buffers.nmsSortIndices, buffers.nmsSortIndicesSize,
+        buffers.nmsOutputProb, buffers.nmsOutputProbSize, buffers.nmsOutputReg,
+        buffers.nmsOutputRegSize, buffers.nmsOutputBoxes,
+        buffers.nmsOutputBoxesSize, iouThreshold, stream);
+
+    debugPrintVals(buffers.nmsOutputBoxes, 20, 0, stream);
+    // debugPrintVals(buffers.reg, 10, 0, stream);
 
     // Things might be different at this point. Want to verify:
     // - Original image is the same

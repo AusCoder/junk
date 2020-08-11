@@ -11,9 +11,24 @@
 #include <opencv2/core.hpp>
 
 struct MtcnnPnetBuffers {
+  // TODO: add more sizes here
   float *resizedImage;
   float *prob;
   float *reg;
+  float *generateBoxesOutputProb;
+  size_t generateBoxesOutputProbSize;
+  float *generateBoxesOutputReg;
+  size_t generateBoxesOutputRegSize;
+  float *generateBoxesOutputBoxes;
+  size_t generateBoxesOutputBoxesSize;
+  int *nmsSortIndices;
+  size_t nmsSortIndicesSize;
+  float *nmsOutputProb;
+  size_t nmsOutputProbSize;
+  float *nmsOutputReg;
+  size_t nmsOutputRegSize;
+  float *nmsOutputBoxes;
+  size_t nmsOutputBoxesSize;
 };
 
 class Mtcnn {
@@ -46,8 +61,13 @@ private:
   int requiredImageDepth = 3;
   int dImageResizeBoxSize = 4;
 
+  int maxBoxesToGenerate = 500;
+
   float factor = 0.709f;
   int minSize = 40;
+  float threshold1 = 0.9;
+  float threshold2 = 0.95;
+  float threshold3 = 0.95;
 };
 
 #endif

@@ -148,14 +148,18 @@ def stage_one(
 
         # sys.exit(1)
 
-        input_prob = prob
-        input_reg = reg
+        input_prob = np.array(prob, copy=True)
+        input_reg = np.array(reg, copy=True)
 
         prob = scipy.special.softmax(prob, axis=-1)
 
         (prob,) = prob
         (reg,) = reg
         prob, reg, bbox = generate_bounding_box(prob, reg, threshold, scale)
+
+        # import pdb
+
+        # pdb.set_trace()
 
         save_input_output(
             debug_input_output_dir,
@@ -164,14 +168,32 @@ def stage_one(
                 f"generate-boxes_{scale_idx}_prob",
                 f"generate-boxes_{scale_idx}_reg",
             ],
-            outputs=[bbox],
-            output_prefixes=[f"generate-boxes_{scale_idx}_output-boxes"],
+            outputs=[prob, reg, bbox],
+            output_prefixes=[
+                f"generate-boxes_{scale_idx}_output-prob",
+                f"generate-boxes_{scale_idx}_output-reg",
+                f"generate-boxes_{scale_idx}_output-boxes",
+            ],
         )
 
         indices = nms_indices(bbox, prob, iou_threshold=0.5)
         prob = prob[indices]
         reg = reg[indices]
         bbox = bbox[indices]
+
+        # import pdb
+
+        # pdb.set_trace()
+
+        # save_input_output(
+        #     debug_input_output_dir,
+        #     inputs=[bbox, prob],
+        #     input_prefixes=[
+        #         f"nms-indices_{scale_idx}_boxes",
+        #         f"nms-indices_{scale_idx}_prob",
+        #     ],
+        #     outputs=[],
+        # )
 
         probs.append(prob)
         regs.append(reg)
@@ -270,8 +292,9 @@ def generate_bounding_box(prob, reg, threshold, scale):
     y, x = np.where(mask)
     indices = np.stack([x, y], axis=1)
     bbox = np.concatenate(
-        ((indices * stride + 1) / scale, (indices * stride + cell_size) / scale), axis=1
-    )
+        ((indices * stride + 1) / scale, (indices * stride + cell_size) / scale),
+        axis=1,
+    ).astype(np.float32)
     prob = prob[mask]
     reg = reg[mask]
     return prob, reg, bbox

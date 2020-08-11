@@ -1,5 +1,5 @@
 CXXFLAGS = -g -Wall -std=c++14
-CPPFLAGS = -I./include -I/opt/cnpy/include -I$(CUDA_INSTALL_DIR)/include $(shell pkg-config --cflags opencv4 jsoncpp)
+CPPFLAGS = -I./include -I/opt/cnpy/include -I/opt/cub -I$(CUDA_INSTALL_DIR)/include $(shell pkg-config --cflags opencv4 jsoncpp)
 LDFLAGS = -L./lib -L/opt/cnpy/lib -L$(CUDA_INSTALL_DIR)/lib64
 LDLIBS = $(shell pkg-config --libs opencv4 jsoncpp) -lnvinfer -lnvinfer_plugin -lnvparsers -lcudart -lcnpy
 NVCC = $(CUDA_INSTALL_DIR)/bin/nvcc
@@ -42,6 +42,13 @@ test_trtNet: test_trtNet.o trtNet.o trtNetInfo.o commonCuda.o logger.o
 test_mtcnnKernels: test_mtcnnKernels.o commonCuda.o mtcnnKernels.obj
 	$(CXX) $^ -o $@ $(LDFLAGS) $(LDLIBS)
 
+test_tests: test_tests.o
+	$(CXX) $^ -o $@ $(LDFLAGS) $(LDLIBS)
+
+moderngpuHello:
+	nvcc -std=c++11 --expt-extended-lambda -gencode arch=compute_61,code=compute_61 \
+		-I /opt/src/moderngpu/src -o moderngpuHello moderngpuHello.cu
+
 %.o: %.cpp
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
 
@@ -51,4 +58,4 @@ test_mtcnnKernels: test_mtcnnKernels.o commonCuda.o mtcnnKernels.obj
 clean:
 	$(RM) *.o *.obj main nmsGpu nmsCpu generateBoxes \
 		cropResizeGpu cropResizeCpu loadNumpy mainMtcnn loggerSample test_common \
-		test_trtNet test_mtcnnKernels trtNetMain
+		test_trtNet test_mtcnnKernels trtNetMain moderngpuHello

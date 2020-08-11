@@ -162,6 +162,9 @@ cropResizeCpu
 mainMtcnn
 loggerSample
 trtNetMain
+sort
+reduce
+moderngpuHello
 
 cropTest.jpg
 
@@ -169,6 +172,7 @@ cuda/det/data/frzn/
 cuda/det/data/uff/
 cuda/det/data/pkgs/
 cuda/det/data/debug_uff/
+cub/
 
 imShow
 showPixels
