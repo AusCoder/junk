@@ -208,8 +208,27 @@ def stage_one(
     reg = reg[indices]
     bbox = bbox[indices]
 
+    inpt_box = np.array(bbox, copy=True)
+    inpt_reg = np.array(reg, copy=True)
+
     bbox = regress_box(bbox, reg)
+    outp_reg = np.array(bbox, copy=True)
     bbox = square_box(bbox)
+
+    save_input_output(
+        debug_input_output_dir,
+        inputs=[inpt_box, inpt_reg],
+        input_prefixes=[
+            f"regress-and-square_input-box",
+            f"regress-and-square_input-reg",
+        ],
+        outputs=[outp_reg, bbox],
+        output_prefixes=[
+            "regress-and-square_output-reg-boxes",
+            "regress-and-square_output-reg-and-sq-boxes",
+        ],
+    )
+
     return prob, bbox
 
 

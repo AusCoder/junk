@@ -11,7 +11,7 @@
 #include <opencv2/imgproc.hpp>
 #include <string>
 
-#include "commonCuda.h"
+#include "commonCuda.hpp"
 #include "mtcnnKernels.h"
 
 static std::map<std::pair<int, int>, TrtNet> createPnets() {
@@ -27,53 +27,9 @@ static std::map<std::pair<int, int>, TrtNet> createPnets() {
   return pnets;
 }
 
-// TODO: move to a MtcnnPnetBuffers cstor
-static MtcnnPnetBuffers allocatePnetBuffers(int batchSize,
-                                            int maxBoxesToGenerate,
-                                            const TrtNetInfo &netInfo) {
-  MtcnnPnetBuffers pnetBuffers;
-  // TODO: write these buffer sizes somewhere too for checking
-  CUDACHECK(cudaMalloc(reinterpret_cast<void **>(&pnetBuffers.resizedImage),
-                       sizeof(float) * batchSize *
-                           netInfo.inputTensorInfos[0].volume()));
-  CUDACHECK(cudaMalloc(reinterpret_cast<void **>(&pnetBuffers.prob),
-                       sizeof(float) * batchSize *
-                           netInfo.outputTensorInfos[0].volume()));
-  CUDACHECK(cudaMalloc(reinterpret_cast<void **>(&pnetBuffers.reg),
-                       sizeof(float) * batchSize *
-                           netInfo.outputTensorInfos[1].volume()));
-  CUDACHECK(cudaMalloc(
-      reinterpret_cast<void **>(&pnetBuffers.generateBoxesOutputProb),
-      sizeof(float) * maxBoxesToGenerate));
-  pnetBuffers.generateBoxesOutputProbSize = maxBoxesToGenerate;
-  CUDACHECK(
-      cudaMalloc(reinterpret_cast<void **>(&pnetBuffers.generateBoxesOutputReg),
-                 sizeof(float) * 4 * maxBoxesToGenerate));
-  pnetBuffers.generateBoxesOutputRegSize = 4 * maxBoxesToGenerate;
-  CUDACHECK(cudaMalloc(
-      reinterpret_cast<void **>(&pnetBuffers.generateBoxesOutputBoxes),
-      sizeof(float) * 4 * maxBoxesToGenerate));
-  pnetBuffers.generateBoxesOutputBoxesSize = 4 * maxBoxesToGenerate;
-
-  CUDACHECK(cudaMalloc(reinterpret_cast<void **>(&pnetBuffers.nmsSortIndices),
-                       sizeof(int) * maxBoxesToGenerate));
-  pnetBuffers.nmsSortIndicesSize = maxBoxesToGenerate;
-  CUDACHECK(cudaMalloc(reinterpret_cast<void **>(&pnetBuffers.nmsOutputProb),
-                       sizeof(float) * maxBoxesToGenerate));
-  pnetBuffers.nmsOutputProbSize = maxBoxesToGenerate;
-  CUDACHECK(cudaMalloc(reinterpret_cast<void **>(&pnetBuffers.nmsOutputReg),
-                       sizeof(float) * 4 * maxBoxesToGenerate));
-  pnetBuffers.nmsOutputRegSize = 4 * maxBoxesToGenerate;
-  CUDACHECK(cudaMalloc(reinterpret_cast<void **>(&pnetBuffers.nmsOutputBoxes),
-                       sizeof(float) * 4 * maxBoxesToGenerate));
-  pnetBuffers.nmsOutputBoxesSize = 4 * maxBoxesToGenerate;
-  return pnetBuffers;
-}
-
-static void debugDenormalizeAndSaveDeviceImage(float *dImage, int imageWidth,
-                                               int imageHeight, int depth,
-                                               const std::string &outPath,
-                                               cudaStream_t *stream) {
+static cv::Mat debugGetDeviceImage(DevicePtr<float> image, int imageWidth,
+                                   int imageHeight, int depth,
+                                   cudaStream_t *stream) {
   cv::Mat mat;
   mat.create(imageHeight, imageWidth, CV_32FC3);
 
@@ -81,66 +37,101 @@ static void debugDenormalizeAndSaveDeviceImage(float *dImage, int imageWidth,
   assert(mat.total() * mat.elemSize() ==
          imageHeight * imageWidth * depth * sizeof(float));
 
-  denormalizePixels(dImage, imageHeight * imageWidth * depth, stream);
-  CUDACHECK(cudaMemcpyAsync(static_cast<void *>(mat.ptr<float>()),
-                            static_cast<void *>(dImage),
-                            sizeof(float) * imageHeight * imageWidth * depth,
-                            cudaMemcpyDeviceToHost, *stream));
+  denormalizePixels(image.get(), imageHeight * imageWidth * depth, stream);
+  CopyElementsAsync(mat.ptr<float>(), image, imageHeight * imageWidth * depth,
+                    *stream);
   CUDACHECK(cudaStreamSynchronize(*stream));
 
   mat.convertTo(mat, CV_8UC3);
   cv::cvtColor(mat, mat, cv::COLOR_RGB2BGR);
+  return mat;
+}
+
+static void debugSaveDeviceImage(DevicePtr<float> image, int imageWidth,
+                                 int imageHeight, int depth,
+                                 const std::string &outPath,
+                                 cudaStream_t *stream) {
+  auto mat = debugGetDeviceImage(image, imageWidth, imageHeight, depth, stream);
   cv::imwrite(outPath, mat);
 }
 
-Mtcnn::Mtcnn(cudaStream_t *stream) : pnets{createPnets()} {
-  std::map<std::pair<int, int>, TrtNetInfo> netInfos;
+static void debugSaveDeviceImage(DevicePtr<float> image, int imageWidth,
+                                 int imageHeight, int depth,
+                                 DevicePtr<float> boxes,
+                                 const std::string &outPath,
+                                 cudaStream_t *stream) {
+  auto mat = debugGetDeviceImage(image, imageWidth, imageHeight, depth, stream);
+  auto hBoxes = boxes.asVec(*stream);
+  CUDACHECK(cudaStreamSynchronize(*stream));
+  for (size_t i = 0; i < hBoxes.size() / 4; i++) {
+    cv::Point p1{static_cast<int>(hBoxes.at(4 * i + 0)),
+                 static_cast<int>(hBoxes.at(4 * i + 1))};
+    cv::Point p2{static_cast<int>(hBoxes.at(4 * i + 2)),
+                 static_cast<int>(hBoxes.at(4 * i + 3))};
+    cv::rectangle(mat, p1, p2, {0, 255, 0});
+  }
+  cv::imwrite(outPath, mat);
+}
+
+static const TrtNetInfo &
+maxSizePnetInfo(const std::map<std::pair<int, int>, TrtNet> &pnets) {
+  auto m = std::max_element(pnets.begin(), pnets.end(), [](auto &n1, auto &n2) {
+    return n1.first.first < n2.first.first;
+  });
+  return m->second.getTrtNetInfo();
+}
+
+PnetMemory::PnetMemory(int batchSize, int maxBoxesToGenerate,
+                       const TrtNetInfo &netInfo)
+    : resizedImage{DeviceMemory<float>::AllocateElements(
+          batchSize * netInfo.inputTensorInfos[0].volume())},
+      prob{DeviceMemory<float>::AllocateElements(
+          batchSize * netInfo.outputTensorInfos.at(0).volume())},
+      reg{DeviceMemory<float>::AllocateElements(
+          batchSize * netInfo.outputTensorInfos.at(1).volume())},
+      generateBoxesOutputProb{
+          DeviceMemory<float>::AllocateElements(maxBoxesToGenerate)},
+      generateBoxesOutputReg{
+          DeviceMemory<float>::AllocateElements(4 * maxBoxesToGenerate)},
+      generateBoxesOutputBoxes{
+          DeviceMemory<float>::AllocateElements(4 * maxBoxesToGenerate)},
+      generateBoxesOutputBoxesCount{DeviceMemory<int>::AllocateElements(1)},
+      nmsSortIndices{DeviceMemory<int>::AllocateElements(maxBoxesToGenerate)},
+      nmsOutputProb{DeviceMemory<float>::AllocateElements(maxBoxesToGenerate)},
+      outputReg{DeviceMemory<float>::AllocateElements(4 * maxBoxesToGenerate)},
+      outputBoxes{
+          DeviceMemory<float>::AllocateElements(4 * maxBoxesToGenerate)},
+      outputBoxesCount{DeviceMemory<int>::AllocateElements(1)} {}
+
+Mtcnn::Mtcnn(cudaStream_t &stream)
+    : pnets{createPnets()}, dImage{DeviceMemory<float>::AllocateElements(
+                                requiredImageWidth * requiredImageHeight *
+                                requiredImageDepth)},
+      dImageResizeBox{
+          DeviceMemory<float>::AllocateElements(dImageResizeBoxSize)},
+      pnetMemory{1, maxBoxesToGenerate, maxSizePnetInfo(pnets)} {
+  // std::map<std::pair<int, int>, TrtNetInfo> netInfos;
   // This is mapping of a dict and inserting into a new dict
-  std::transform(pnets.begin(), pnets.end(),
-                 std::inserter(netInfos, netInfos.begin()),
-                 [](auto &net) -> std::pair<std::pair<int, int>, TrtNetInfo> {
-                   return {net.first, net.second.getTrtNetInfo()};
-                 });
-  std::transform(
-      netInfos.begin(), netInfos.end(),
-      std::inserter(pnetBuffers, pnetBuffers.begin()),
-      [this](
-          auto &netInfo) -> std::pair<std::pair<int, int>, MtcnnPnetBuffers> {
-        return {netInfo.first,
-                allocatePnetBuffers(1, maxBoxesToGenerate, netInfo.second)};
-      });
+  // std::transform(pnets.begin(), pnets.end(),
+  //                std::inserter(netInfos, netInfos.begin()),
+  //                [](auto &net) -> std::pair<std::pair<int, int>, TrtNetInfo>
+  //                {
+  //                  return {net.first, net.second.getTrtNetInfo()};
+  //                });
+
+  // std::transform(
+  //     netInfos.begin(), netInfos.end(),
+  //     std::inserter(pnetMemory, pnetMemory.begin()),
+  //     [this](auto &netInfo) -> std::pair<std::pair<int, int>, PnetMemory> {
+  //       return {netInfo.first,
+  //               PnetMemory(1, maxBoxesToGenerate, netInfo.second)};
+  //     });
+
   std::for_each(pnets.begin(), pnets.end(),
                 [](auto &net) -> void { net.second.start(); });
 
-  CUDACHECK(cudaMalloc(reinterpret_cast<void **>(&dImage),
-                       sizeof(float) * requiredImageHeight *
-                           requiredImageWidth * requiredImageDepth));
-  CUDACHECK(cudaMalloc(reinterpret_cast<void **>(&dImageResizeBox),
-                       sizeof(float) * dImageResizeBoxSize));
-  std::vector<float> imageResizeBox{0.0, 0.0, 1.0, 1.0};
-  assert(imageResizeBox.size() == dImageResizeBoxSize);
-  CUDACHECK(cudaMemcpyAsync(static_cast<void *>(dImageResizeBox),
-                            static_cast<void *>(imageResizeBox.data()),
-                            sizeof(float) * imageResizeBox.size(),
-                            cudaMemcpyHostToDevice, *stream));
-}
-
-Mtcnn::~Mtcnn() {
-  CUDACHECK(cudaFree(dImage));
-  CUDACHECK(cudaFree(dImageResizeBox));
-
-  for (auto &buffers : pnetBuffers) {
-    CUDACHECK(cudaFree(buffers.second.resizedImage));
-    CUDACHECK(cudaFree(buffers.second.prob));
-    CUDACHECK(cudaFree(buffers.second.reg));
-    CUDACHECK(cudaFree(buffers.second.generateBoxesOutputProb));
-    CUDACHECK(cudaFree(buffers.second.generateBoxesOutputReg));
-    CUDACHECK(cudaFree(buffers.second.generateBoxesOutputBoxes));
-    CUDACHECK(cudaFree(buffers.second.nmsSortIndices));
-    CUDACHECK(cudaFree(buffers.second.nmsOutputProb));
-    CUDACHECK(cudaFree(buffers.second.nmsOutputReg));
-    CUDACHECK(cudaFree(buffers.second.nmsOutputBoxes));
-  }
+  CopyAllElementsAsync(static_cast<DevicePtr<float>>(dImageResizeBox),
+                       {0.0, 0.0, 1.0, 1.0}, stream);
 }
 
 void Mtcnn::predict(cv::Mat image, cudaStream_t *stream) {
@@ -174,12 +165,12 @@ void Mtcnn::stageOne(cv::Mat image, cudaStream_t *stream) {
     image = image.clone();
   }
 
-  CUDACHECK(cudaMemcpyAsync(static_cast<void *>(dImage),
-                            static_cast<void *>(image.ptr<float>()),
-                            sizeof(float) * imageHeight * imageWidth * depth,
-                            cudaMemcpyHostToDevice, *stream));
-  normalizePixels(dImage, imageHeight * imageWidth * depth, stream);
+  CopyElementsAsync(dImage, image.ptr<float>(),
+                    imageHeight * imageWidth * depth, *stream);
+  normalizePixels(dImage, *stream);
   // Agrees with python up to here
+
+  SetElementAsync(pnetMemory.outputBoxesCount, 0, *stream);
 
   for (auto &pnetWithSize : pnets) {
     // Want to allocate gpu buffers up front as much as possible
@@ -195,22 +186,25 @@ void Mtcnn::stageOne(cv::Mat image, cudaStream_t *stream) {
     float scale = static_cast<float>(resizedHeightWidth.first) / imageHeight;
     std::cout << scale << ", " << resizedHeightWidth.first << ", "
               << resizedHeightWidth.second << "\n";
-    auto &buffers = pnetBuffers.at(resizedHeightWidth);
+    // auto &buffers = pnetMemory.at(resizedHeightWidth);
 
+    assert(pnetMemory.resizedImage.size() ==
+           static_cast<std::size_t>(resizedHeightWidth.first *
+                                    resizedHeightWidth.second * depth));
     cropResizeHWC(dImage, imageWidth, imageHeight, depth, dImageResizeBox,
                   dImageResizeBoxSize, resizedHeightWidth.second,
-                  resizedHeightWidth.first, buffers.resizedImage,
+                  resizedHeightWidth.first, pnetMemory.resizedImage,
                   resizedHeightWidth.first * resizedHeightWidth.second * depth,
-                  stream);
+                  *stream);
     // Different resizing algorithm means that we differ from python at this
     // point
 
-    // debugDenormalizeAndSaveDeviceImage(
-    //     buffers.resizedImage, resizedHeightWidth.second,
-    //     resizedHeightWidth.first, depth, "deviceResizedImage.jpg", stream);
+    // debugSaveDeviceImage(pnetMemory.resizedImage, resizedHeightWidth.second,
+    //                      resizedHeightWidth.first, depth,
+    //                      "deviceResizedImage.jpg", stream);
 
-    pnet.predict({buffers.resizedImage}, {buffers.prob, buffers.reg}, 1,
-                 stream);
+    pnet.predict({pnetMemory.resizedImage.get()},
+                 {pnetMemory.prob.get(), pnetMemory.reg.get()}, 1, stream);
 
     auto &outputTensorInfos = pnet.getTrtNetInfo().outputTensorInfos;
     int probWidth = outputTensorInfos.at(0).getWidth();
@@ -218,29 +212,37 @@ void Mtcnn::stageOne(cv::Mat image, cudaStream_t *stream) {
     int regWidth = outputTensorInfos.at(1).getWidth();
     int regHeight = outputTensorInfos.at(1).getHeight();
 
-    generateBoxesWithoutSoftmax(
-        buffers.prob, probWidth, probHeight, buffers.reg, regWidth, regHeight,
-        buffers.generateBoxesOutputProb, buffers.generateBoxesOutputReg,
-        buffers.generateBoxesOutputBoxes, maxBoxesToGenerate, threshold1, scale,
-        stream);
+    generateBoxesWithoutSoftmax(pnetMemory.prob.get(), probWidth, probHeight,
+                                pnetMemory.reg.get(), regWidth, regHeight,
+                                pnetMemory.generateBoxesOutputProb.get(),
+                                pnetMemory.generateBoxesOutputReg.get(),
+                                pnetMemory.generateBoxesOutputBoxes.get(),
+                                pnetMemory.generateBoxesOutputBoxesCount.get(),
+                                maxBoxesToGenerate, threshold1, scale, stream);
 
-    float iouThreshold = 0.5;
-    nms(buffers.generateBoxesOutputProb, buffers.generateBoxesOutputProbSize,
-        buffers.generateBoxesOutputReg, buffers.generateBoxesOutputRegSize,
-        buffers.generateBoxesOutputBoxes, buffers.generateBoxesOutputBoxesSize,
-        buffers.nmsSortIndices, buffers.nmsSortIndicesSize,
-        buffers.nmsOutputProb, buffers.nmsOutputProbSize, buffers.nmsOutputReg,
-        buffers.nmsOutputRegSize, buffers.nmsOutputBoxes,
-        buffers.nmsOutputBoxesSize, iouThreshold, stream);
+    const float iouThreshold = 0.5;
+    nms(pnetMemory.generateBoxesOutputProb, pnetMemory.generateBoxesOutputReg,
+        pnetMemory.generateBoxesOutputBoxes,
+        pnetMemory.generateBoxesOutputBoxesCount, pnetMemory.nmsSortIndices,
+        pnetMemory.nmsOutputProb, pnetMemory.outputReg, pnetMemory.outputBoxes,
+        pnetMemory.outputBoxesCount, iouThreshold, *stream);
 
-    debugPrintVals(buffers.nmsOutputBoxes, 20, 0, stream);
-    // debugPrintVals(buffers.reg, 10, 0, stream);
+    // debugPrintVals(pnetMemory.outputBoxes.get(), 20, 0, stream);
+
+    // I can probably roll this into the nms kernel
+    regressAndSquareBoxes(pnetMemory.outputBoxes, pnetMemory.outputReg,
+                          pnetMemory.outputBoxesCount, true, *stream);
+
+    debugSaveDeviceImage(dImage, imageWidth, imageHeight, depth,
+                         pnetMemory.outputBoxes, "deviceResizedImage.jpg",
+                         stream);
 
     // Things might be different at this point. Want to verify:
     // - Original image is the same
     // - After normalizing is the same
     // - After resize is the same
   }
+
   CUDACHECK(cudaStreamSynchronize(*stream));
 }
 

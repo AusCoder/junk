@@ -1,6 +1,6 @@
 #define CATCH_CONFIG_MAIN
 
-#include "commonCuda.h"
+#include "commonCuda.hpp"
 #include "trtNet.h"
 
 #include "catch.hpp"

@@ -1,23 +1,24 @@
 #ifndef _KERNEL_TEST_HARNESS_HPP
 #define _KERNEL_TEST_HARNESS_HPP
 
-#include "commonCuda.h"
+#include "deviceMemory.hpp"
+#include "streamManager.hpp"
 #include <cassert>
 #include <vector>
 
 class KernelTestHarness {
 public:
-  KernelTestHarness() { CUDACHECK(cudaStreamCreate(&stream)); }
+  // KernelTestHarness() { CUDACHECK(cudaStreamCreate(&stream)); }
 
-  ~KernelTestHarness() {
-    for (auto &ptr : deviceInputs) {
-      CUDACHECK(cudaFree(ptr));
-    }
-    for (auto &ptr : deviceOutputs) {
-      CUDACHECK(cudaFree(ptr));
-    }
-    CUDACHECK(cudaStreamDestroy(stream));
-  }
+  // ~KernelTestHarness() {
+  //   for (auto &ptr : deviceInputs) {
+  //     CUDACHECK(cudaFree(ptr));
+  //   }
+  //   for (auto &ptr : deviceOutputs) {
+  //     CUDACHECK(cudaFree(ptr));
+  //   }
+  //   CUDACHECK(cudaStreamDestroy(stream));
+  // }
 
   template <typename InputType>
   void addInput(const std::vector<InputType> &input) {
@@ -70,10 +71,13 @@ public:
   cudaStream_t &getStream() { return stream; }
 
 private:
-  cudaStream_t stream;
-  std::vector<void *> deviceInputs;
-  std::vector<void *> deviceOutputs;
-  std::vector<int> deviceOutputSizes;
+  // cudaStream_t stream;
+  // std::vector<void *> deviceInputs;
+  // std::vector<void *> deviceOutputs;
+  // std::vector<int> deviceOutputSizes;
+
+  StreamManager streamManager;
+  // std::vector<
 };
 
 #endif

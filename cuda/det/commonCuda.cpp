@@ -1,4 +1,4 @@
-#include "commonCuda.h"
+#include "commonCuda.hpp"
 
 #include <stdexcept>
 

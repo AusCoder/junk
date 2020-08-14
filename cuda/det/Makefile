@@ -5,8 +5,8 @@ LDLIBS = $(shell pkg-config --libs opencv4 jsoncpp) -lnvinfer -lnvinfer_plugin -
 NVCC = $(CUDA_INSTALL_DIR)/bin/nvcc
 NVFLAGS = -g -G -Xcompiler -Wall -Xcompiler -std=c++14
 
-mainMtcnn: mainMtcnn.o mtcnn.o trtNet.o trtNetInfo.o commonCuda.o logger.o \
-					mtcnnKernels.obj
+mainMtcnn: mainMtcnn.o mtcnn.o trtNet.o trtNetInfo.o commonCuda.o streamManager.o \
+					logger.o mtcnnKernels.obj
 	$(CXX) $^ -o $@ $(LDFLAGS) $(LDLIBS)
 
 nmsCpu: nmsCpu.o
@@ -33,13 +33,16 @@ loggerSample: loggerSample.o logger.o
 trtNetMain: trtNetMain.o trtNet.o trtNetInfo.o commonCuda.o logger.o
 	$(CXX) $^ -o $@ $(LDFLAGS) $(LDLIBS)
 
+nicerDeviceApi: nicerDeviceApi.o streamManager.o mtcnnKernels.obj
+	$(CXX) $^ -o $@ $(LDFLAGS) $(LDLIBS)
+
 test_common: test_common.o common.o
 	$(CXX) $^ -o $@ $(LDFLAGS) -lopencv_core -lopencv_imgcodecs
 
 test_trtNet: test_trtNet.o trtNet.o trtNetInfo.o commonCuda.o logger.o
 	$(CXX) $^ -o $@ $(LDFLAGS) $(LDLIBS)
 
-test_mtcnnKernels: test_mtcnnKernels.o commonCuda.o mtcnnKernels.obj
+test_mtcnnKernels: test_mtcnnKernels.o commonCuda.o streamManager.o mtcnnKernels.obj
 	$(CXX) $^ -o $@ $(LDFLAGS) $(LDLIBS)
 
 test_tests: test_tests.o
@@ -58,4 +61,4 @@ moderngpuHello:
 clean:
 	$(RM) *.o *.obj main nmsGpu nmsCpu generateBoxes \
 		cropResizeGpu cropResizeCpu loadNumpy mainMtcnn loggerSample test_common \
-		test_trtNet test_mtcnnKernels trtNetMain moderngpuHello
+		test_trtNet test_mtcnnKernels trtNetMain moderngpuHello nicerDeviceApi

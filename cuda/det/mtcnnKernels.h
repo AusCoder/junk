@@ -1,6 +1,7 @@
 #ifndef _MTCNN_KERNEL_H
 #define _MTCNN_KERNEL_H
 
+#include "deviceMemory.hpp"
 #include <cuda_runtime.h>
 
 /**
@@ -11,13 +12,18 @@
 void nmsSimple(float *boxes, size_t boxesSize, float *outBoxes,
                size_t outBoxesSize, float iouThreshold);
 
-void nms(float *prob, size_t probSize, float *reg, size_t regSize, float *boxes,
-         size_t boxesSize, int *sortIndices, size_t sortIndicesSize,
-         float *outProb, size_t outProbSize, float *outReg, size_t outRegSize,
-         float *outBoxes, size_t outBoxesSize, float iouThreshold,
-         cudaStream_t *stream);
+/**
+ * This will start writing to outProb, outReg, outBoxes at
+ * *(outBoxesPosition.get()) and then update outBoxesPosition with the number of
+ * boxes written.
+ */
+void nms(DevicePtr<float> prob, DevicePtr<float> reg, DevicePtr<float> boxes,
+         DevicePtr<int> boxesCount, DevicePtr<int> sortIndices,
+         DevicePtr<float> outProb, DevicePtr<float> outReg,
+         DevicePtr<float> outBoxes, DevicePtr<int> outBoxesPosition,
+         float iouThreshold, cudaStream_t &stream);
 
-void normalizePixels(float *image, size_t imageSize, cudaStream_t *stream);
+void normalizePixels(DevicePtr<float> image, cudaStream_t &stream);
 
 void denormalizePixels(float *image, size_t imageSize, cudaStream_t *stream);
 
@@ -37,15 +43,17 @@ void cropResizeCHW(const float *image, int imageWidth, int imageHeight,
                    int cropHeight, float *croppedResizedImages,
                    int croppedResizedImagesSize, cudaStream_t *stream);
 
-void cropResizeHWC(const float *image, int imageWidth, int imageHeight,
-                   int depth, const float *boxes, int boxesSize, int cropWidth,
-                   int cropHeight, float *croppedResizedImages,
+void cropResizeHWC(DevicePtr<float> image, int imageWidth, int imageHeight,
+                   int depth, DevicePtr<float> boxes, int boxesSize,
+                   int cropWidth, int cropHeight,
+                   DevicePtr<float> croppedResizedImages,
                    int croppedResizedImagesSize);
 
-void cropResizeHWC(const float *image, int imageWidth, int imageHeight,
-                   int depth, const float *boxes, int boxesSize, int cropWidth,
-                   int cropHeight, float *croppedResizedImages,
-                   int croppedResizedImagesSize, cudaStream_t *stream);
+void cropResizeHWC(DevicePtr<float> image, int imageWidth, int imageHeight,
+                   int depth, DevicePtr<float> boxes, int boxesSize,
+                   int cropWidth, int cropHeight,
+                   DevicePtr<float> croppedResizedImages,
+                   int croppedResizedImagesSize, cudaStream_t &stream);
 
 /**
  * Assumes outIndices has size >= maxOutIndices
@@ -62,8 +70,20 @@ void generateBoxesWithoutSoftmaxIndices(float *prob, int probWidth,
 void generateBoxesWithoutSoftmax(float *prob, int probWidth, int probHeight,
                                  float *reg, int regWidth, int regHeight,
                                  float *outProb, float *outReg,
-                                 float *outBboxes, int maxOutputBoxes,
-                                 float threshold, float scale,
-                                 cudaStream_t *stream);
+                                 float *outBboxes, int *outBoxesCount,
+                                 int maxOutputBoxes, float threshold,
+                                 float scale, cudaStream_t *stream);
+
+/**
+ * Modifies boxes inplace
+ *
+ * Make boxexCount a size_t?
+ */
+void regressAndSquareBoxes(DevicePtr<float> boxes, DevicePtr<float> reg,
+                           DevicePtr<int> boxesCount, bool shouldSquare,
+                           cudaStream_t &stream);
+
+void scalarMult(DevicePtr<float> p, size_t pSize, float value,
+                cudaStream_t &stream);
 
 #endif

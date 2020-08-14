@@ -1,6 +1,6 @@
 #include "trtNet.h"
 #include "NvUffParser.h"
-#include "commonCuda.h"
+#include "commonCuda.hpp"
 #include "logger.h"
 
 #include <cassert>
@@ -33,12 +33,12 @@ TrtNet::~TrtNet() {
   }
 }
 
-const TrtNetInfo &TrtNet::getTrtNetInfo() { return trtNetInfo; }
-const TensorInfo &TrtNet::getInputTensorInfo(int i) {
+const TrtNetInfo &TrtNet::getTrtNetInfo() const { return trtNetInfo; }
+const TensorInfo &TrtNet::getInputTensorInfo(int i) const {
   return trtNetInfo.inputTensorInfos.at(i);
 }
 
-const TensorInfo &TrtNet::getOutputTensorInfo(int i) {
+const TensorInfo &TrtNet::getOutputTensorInfo(int i) const {
   return trtNetInfo.outputTensorInfos.at(i);
 }
 

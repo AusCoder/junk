@@ -68,4 +68,6 @@ def save_array(
         post = f"_{postfix}"
     path = debug_input_output_dir.joinpath(f"{prefix}_{rendered_shape}{post}.npy")
     logger.info("Saving array of shape %s to %s", path)
+    if array.dtype == np.float64:
+        array = array.astype(np.float32)
     np.save(path, array)

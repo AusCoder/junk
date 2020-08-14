@@ -1,6 +1,6 @@
 // TODO: Remove this program, it is just for debugging purposes
 #include "cnpy.h"
-#include "commonCuda.h"
+#include "commonCuda.hpp"
 #include "trtNet.h"
 #include "trtNetInfo.h"
 

@@ -38,9 +38,9 @@ public:
                        const std::vector<float *> &outputs, int batchSize,
                        cudaStream_t *stream);
 
-  const TrtNetInfo &getTrtNetInfo();
-  const TensorInfo &getInputTensorInfo(int i);
-  const TensorInfo &getOutputTensorInfo(int i);
+  const TrtNetInfo &getTrtNetInfo() const;
+  const TensorInfo &getInputTensorInfo(int i) const;
+  const TensorInfo &getOutputTensorInfo(int i) const;
 
   static TrtNet createFromUffAndInfoFile(const std::string &uffPath);
 

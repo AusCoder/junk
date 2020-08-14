@@ -1,6 +1,7 @@
 #ifndef _MTCNN_H_
 #define _MTCNN_H_
 
+#include "deviceMemory.hpp"
 #include "trtNet.h"
 
 #include <algorithm>
@@ -10,31 +11,34 @@
 
 #include <opencv2/core.hpp>
 
-struct MtcnnPnetBuffers {
-  // TODO: add more sizes here
-  float *resizedImage;
-  float *prob;
-  float *reg;
-  float *generateBoxesOutputProb;
-  size_t generateBoxesOutputProbSize;
-  float *generateBoxesOutputReg;
-  size_t generateBoxesOutputRegSize;
-  float *generateBoxesOutputBoxes;
-  size_t generateBoxesOutputBoxesSize;
-  int *nmsSortIndices;
-  size_t nmsSortIndicesSize;
-  float *nmsOutputProb;
-  size_t nmsOutputProbSize;
-  float *nmsOutputReg;
-  size_t nmsOutputRegSize;
-  float *nmsOutputBoxes;
-  size_t nmsOutputBoxesSize;
+struct PnetMemory {
+  PnetMemory(int batchSize, int maxBoxesToGenerate, const TrtNetInfo &netInfo);
+
+  PnetMemory(const PnetMemory &) = delete;
+  PnetMemory &operator=(const PnetMemory &) = delete;
+
+  DeviceMemory<float> resizedImage;
+  DeviceMemory<float> prob;
+  DeviceMemory<float> reg;
+
+  DeviceMemory<float> generateBoxesOutputProb;
+  DeviceMemory<float> generateBoxesOutputReg;
+  DeviceMemory<float> generateBoxesOutputBoxes;
+  DeviceMemory<int> generateBoxesOutputBoxesCount;
+
+  DeviceMemory<int> nmsSortIndices;
+  DeviceMemory<float> nmsOutputProb;
+
+  // TODO: rename these outputPorb, outputReg, outputBoxes?
+  // Actually, we just care about the output boxes really
+  DeviceMemory<float> outputReg;
+  DeviceMemory<float> outputBoxes;
+  DeviceMemory<int> outputBoxesCount;
 };
 
 class Mtcnn {
 public:
-  Mtcnn(cudaStream_t *stream);
-  ~Mtcnn();
+  Mtcnn(cudaStream_t &stream);
 
   Mtcnn(const Mtcnn &) = delete;
   Mtcnn &operator=(const Mtcnn &) = delete;
@@ -48,14 +52,6 @@ private:
 
   std::vector<float> computeScales(int height, int width);
 
-  std::map<std::pair<int, int>, TrtNet> pnets;
-  // TrtNet onet;
-  // TrtNet rnet;
-
-  float *dImage;          // originalImage
-  float *dImageResizeBox; // resize original image box
-  std::map<std::pair<int, int>, MtcnnPnetBuffers> pnetBuffers;
-
   int requiredImageHeight = 720;
   int requiredImageWidth = 1280;
   int requiredImageDepth = 3;
@@ -68,6 +64,17 @@ private:
   float threshold1 = 0.9;
   float threshold2 = 0.95;
   float threshold3 = 0.95;
+
+  std::map<std::pair<int, int>, TrtNet> pnets;
+  // TrtNet onet;
+  // TrtNet rnet;
+
+  // float *dImage; // originalImage
+  // float *dImageResizeBox; // resize original image box
+  DeviceMemory<float> dImage;
+  DeviceMemory<float> dImageResizeBox;
+  PnetMemory pnetMemory;
+  // std::map<std::pair<int, int>, MtcnnPnetMemory> pnetMemory;
 };
 
 #endif

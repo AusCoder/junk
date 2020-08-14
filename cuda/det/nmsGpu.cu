@@ -7,7 +7,7 @@
 
 #include <cuda_runtime.h>
 
-#include "commonCuda.h"
+#include "commonCuda.hpp"
 #include "mtcnnKernels.h"
 
 using namespace std;

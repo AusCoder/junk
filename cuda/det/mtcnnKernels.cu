@@ -3,19 +3,19 @@
 #include <cstdio>
 #include <cub/cub.cuh>
 
-__global__ void normalizePixelsKernel(float *image, size_t imageSize) {
+__global__ void normalizePixelsKernel(DevicePtr<float> image) {
   int i = threadIdx.x + blockIdx.x * blockDim.x;
-  if (i < imageSize) {
+  if (i < image.size()) {
     image[i] -= 127.5;
     image[i] /= 128.0;
   }
 }
 
-void normalizePixels(float *image, size_t imageSize, cudaStream_t *stream) {
+void normalizePixels(DevicePtr<float> image, cudaStream_t &stream) {
   const int block = 1024;
-  const int grid = (imageSize + block - 1) / block;
+  const int grid = (image.size() + block - 1) / block;
   // TODO: needs CUDACHECK?
-  normalizePixelsKernel<<<grid, block, 0, *stream>>>(image, imageSize);
+  normalizePixelsKernel<<<grid, block, 0, stream>>>(image);
 }
 
 __global__ void denormalizePixelsKernel(float *image, size_t imageSize) {
@@ -150,8 +150,7 @@ void nmsSimple(float *boxes, size_t boxesSize, float *outBoxes,
 
 template <int BLOCK_THREADS, int ITEMS_PER_THREAD>
 __launch_bounds__(BLOCK_THREADS) __global__
-    void sortProb(float *prob, size_t probSize, int *outIndices,
-                  size_t outIndicesSize) {
+    void sortProb(DevicePtr<float> prob, DevicePtr<int> size, DevicePtr<int> outIndices) {
   typedef cub::BlockLoad<float, BLOCK_THREADS, ITEMS_PER_THREAD> BlockLoad;
   typedef cub::BlockRadixSort<float, BLOCK_THREADS, ITEMS_PER_THREAD, int>
       BlockRadixSort;
@@ -165,7 +164,7 @@ __launch_bounds__(BLOCK_THREADS) __global__
 
   float threadKeys[ITEMS_PER_THREAD];
   int threadValues[ITEMS_PER_THREAD];
-  BlockLoad(tempStorage.keys).Load(prob, threadKeys, probSize, -1);
+  BlockLoad(tempStorage.keys).Load(prob.get(), threadKeys, *(size.get()), -1);
 
   for (int i = 0; i < ITEMS_PER_THREAD; i++) {
     threadValues[i] = threadIdx.x * ITEMS_PER_THREAD + i;
@@ -173,31 +172,34 @@ __launch_bounds__(BLOCK_THREADS) __global__
   __syncthreads();
   BlockRadixSort(tempStorage.sort).SortDescending(threadKeys, threadValues);
   __syncthreads();
-  BlockStore(tempStorage.store).Store(outIndices, threadValues, outIndicesSize);
+  BlockStore(tempStorage.store)
+      .Store(outIndices.get(), threadValues, outIndices.size());
 }
 
 template <int BLOCK_THREADS>
 __launch_bounds__(BLOCK_THREADS) __global__
-    void nmsKernel(int *sortOrder, size_t sortOrderSize, float *prob,
-                   size_t probSize, float *reg, size_t regSize, float *boxes,
-                   size_t boxesSize, float *outProb, size_t outProbSize,
-                   float *outReg, size_t outRegSize, float *outBoxes,
-                   size_t outBoxesSize, float iouThreshold) {
+    void nmsKernel(DevicePtr<float> prob, DevicePtr<float> reg,
+                   DevicePtr<float> boxes, DevicePtr<int> boxesCount,
+                   DevicePtr<int> sortIndices, DevicePtr<float> outProb,
+                   DevicePtr<float> outReg, DevicePtr<float> outBoxes,
+                   DevicePtr<int> outBoxesPosition, float iouThreshold) {
   // rename maxBoxIdx to boxIdxsSize? It's not an index, it's a size
-  int maxBoxIdx = boxesSize / 4;
-  assert(maxBoxIdx <= BLOCK_THREADS);
-  assert(outRegSize == 4 * outProbSize);
-  assert(outBoxesSize == 4 * outProbSize);
+  // int maxBoxIdx = boxes.size() / 4;
+  int boxesCount_ = *(boxesCount.get());
+  size_t outProbSize = outProb.size();
+  assert(boxesCount_ <= BLOCK_THREADS);
+  assert(outReg.size() == 4 * outProbSize);
+  assert(outBoxes.size() == 4 * outProbSize);
 
   __shared__ bool keptBoxes[BLOCK_THREADS];
 
   // int curBoxIdx = threadIdx.x;
-  // int curBoxIdx = sortOrder[threadIdx.x];
+  // int curBoxIdx = sortIndices[threadIdx.x];
   int curBoxSortIdx = threadIdx.x;
-  int curBoxIdx = sortOrder[curBoxSortIdx];
+  int curBoxIdx = sortIndices[curBoxSortIdx];
   BBox curBox; // this threads box
 
-  if (curBoxSortIdx < maxBoxIdx) {
+  if (curBoxSortIdx < boxesCount_) {
     curBox = BBox{boxes[4 * curBoxIdx], boxes[4 * curBoxIdx + 1],
                   boxes[4 * curBoxIdx + 2], boxes[4 * curBoxIdx + 3]};
     keptBoxes[curBoxSortIdx] = true;
@@ -205,14 +207,13 @@ __launch_bounds__(BLOCK_THREADS) __global__
     keptBoxes[curBoxSortIdx] = false;
   }
 
-  int outIdx = 0;
-  // int refBoxIdx = 0;
-  // int refBoxIdx = sortOrder[0];  // something like this
+  // TODO: we want to offset here, so change to be *(outBoxesCount.get())
+  int outIdx = *(outBoxesPosition.get());
   int refBoxSortIdx = 0;
 
-  while ((refBoxSortIdx < maxBoxIdx) && (outIdx < outProbSize)) {
-    int refBoxIdx = sortOrder[refBoxSortIdx];
-    BBox refBox{boxes[4 * refBoxIdx], boxes[4 * refBoxIdx + 1],
+  while ((refBoxSortIdx < boxesCount_) && (outIdx < outProbSize)) {
+    int refBoxIdx = sortIndices[refBoxSortIdx];
+    BBox refBox{boxes[4 * refBoxIdx + 0], boxes[4 * refBoxIdx + 1],
                 boxes[4 * refBoxIdx + 2], boxes[4 * refBoxIdx + 3]};
 
     if (curBoxSortIdx > refBoxSortIdx) {
@@ -243,28 +244,27 @@ __launch_bounds__(BLOCK_THREADS) __global__
 
     do {
       refBoxSortIdx += 1;
-    } while (!keptBoxes[refBoxSortIdx] && refBoxSortIdx < maxBoxIdx);
+    } while (!keptBoxes[refBoxSortIdx] && refBoxSortIdx < boxesCount_);
 
     outIdx += 1;
   }
 
   __syncthreads();
-  // if (threadIdx.x == 0) {
-  // printf("nms kernel in thread %d outIdx %d\n", threadIdx.x, outIdx);
-  // }
+  if (threadIdx.x == 0) {
+    printf("Nms outIdx %d\n", outIdx);
+    outBoxesPosition[0] = outIdx;
+  }
 }
 
-void nms(float *prob, size_t probSize, float *reg, size_t regSize, float *boxes,
-         size_t boxesSize, int *sortIndices, size_t sortIndicesSize,
-         float *outProb, size_t outProbSize, float *outReg, size_t outRegSize,
-         float *outBoxes, size_t outBoxesSize, float iouThreshold,
-         cudaStream_t *stream) {
-  sortProb<128, 8><<<1, 128, 0, *stream>>>(prob, probSize, sortIndices,
-                                           sortIndicesSize);
-  nmsKernel<512><<<1, 512, 0, *stream>>>(
-      sortIndices, sortIndicesSize, prob, probSize, reg, regSize,
-      boxes, boxesSize, outProb, outProbSize, outReg, outRegSize, outBoxes,
-      outBoxesSize, iouThreshold);
+void nms(DevicePtr<float> prob, DevicePtr<float> reg, DevicePtr<float> boxes,
+         DevicePtr<int> boxesCount, DevicePtr<int> sortIndices,
+         DevicePtr<float> outProb, DevicePtr<float> outReg,
+         DevicePtr<float> outBoxes, DevicePtr<int> outBoxesPosition,
+         float iouThreshold, cudaStream_t &stream) {
+  sortProb<128, 8><<<1, 128, 0, stream>>>(prob, boxesCount, sortIndices);
+  nmsKernel<512><<<1, 512, 0, stream>>>(prob, reg, boxes, boxesCount,
+                                        sortIndices, outProb, outReg, outBoxes,
+                                        outBoxesPosition, iouThreshold);
 }
 // blockSize will be {1024, 1, 1}
 // gridSize...
@@ -352,9 +352,10 @@ cropResizeCHWKernel(const float *image, int imageWidth, int imageHeight,
 }
 
 __global__ void
-cropResizeHWCKernel(const float *image, int imageWidth, int imageHeight,
-                    int depth, const float *boxes, int boxesSize, int cropWidth,
-                    int cropHeight, float *croppedResizedImages,
+cropResizeHWCKernel(DevicePtr<float> image, int imageWidth, int imageHeight,
+                    int depth, DevicePtr<float> boxes, int boxesSize,
+                    int cropWidth, int cropHeight,
+                    DevicePtr<float> croppedResizedImages,
                     int croppedResizedImagesSize // == boxesSize * cropWidth *
                                                  // cropHeight * depth
 ) {
@@ -471,13 +472,14 @@ void cropResizeCHW(const float *image, int imageWidth, int imageHeight,
       cropHeight, croppedResizedImages, croppedResizedImagesSize);
 }
 
-void cropResizeHWC(const float *image, int imageWidth, int imageHeight,
-                   int depth, const float *boxes, int boxesSize, int cropWidth,
-                   int cropHeight, float *croppedResizedImages,
+void cropResizeHWC(DevicePtr<float> image, int imageWidth, int imageHeight,
+                   int depth, DevicePtr<float> boxes, int boxesSize,
+                   int cropWidth, int cropHeight,
+                   DevicePtr<float> croppedResizedImages,
                    int croppedResizedImagesSize // == boxesSize * cropWidth *
                                                 // cropHeight * depth
 ) {
-  const int block = 1024;
+  const int block = 512;
   const int grid = (croppedResizedImagesSize + block - 1) / block;
 
   cropResizeHWCKernel<<<grid, block>>>(
@@ -485,14 +487,15 @@ void cropResizeHWC(const float *image, int imageWidth, int imageHeight,
       cropHeight, croppedResizedImages, croppedResizedImagesSize);
 }
 
-void cropResizeHWC(const float *image, int imageWidth, int imageHeight,
-                   int depth, const float *boxes, int boxesSize, int cropWidth,
-                   int cropHeight, float *croppedResizedImages,
-                   int croppedResizedImagesSize, cudaStream_t *stream) {
-  const int block = 1024;
+void cropResizeHWC(DevicePtr<float> image, int imageWidth, int imageHeight,
+                   int depth, DevicePtr<float> boxes, int boxesSize,
+                   int cropWidth, int cropHeight,
+                   DevicePtr<float> croppedResizedImages,
+                   int croppedResizedImagesSize, cudaStream_t &stream) {
+  const int block = 512;
   const int grid = (croppedResizedImagesSize + block - 1) / block;
 
-  cropResizeHWCKernel<<<grid, block, 0, *stream>>>(
+  cropResizeHWCKernel<<<grid, block, 0, stream>>>(
       image, imageWidth, imageHeight, depth, boxes, boxesSize, cropWidth,
       cropHeight, croppedResizedImages, croppedResizedImagesSize);
 }
@@ -595,7 +598,7 @@ template <int TSIZE, int DIM>
 __global__ void generateBoxesWithoutSoftmaxKernel(
     float *prob, int probWidth, int probHeight, float *reg, int regWidth,
     int regHeight, float *outProb, float *outReg, float *outBboxes,
-    int maxOutputBoxes, float threshold, float scale) {
+    int *outBoxesCount, int maxOutputBoxes, float threshold, float scale) {
   // This is for a single element, ie a batch size of 1
   // I have seen nms code that uses one block per batch item
   // See nmsLayer.cu from TensorRT kernels
@@ -618,10 +621,10 @@ __global__ void generateBoxesWithoutSoftmaxKernel(
     }
   }
 
+  bool shouldBreak = false;
+
   for (int i = 0; i < TSIZE; i++) {
-
     for (int j = 0; j < DIM; j++) {
-
       int offset = i * DIM;
       int index = offset + j;
       if (index >= probSize) {
@@ -663,25 +666,90 @@ __global__ void generateBoxesWithoutSoftmaxKernel(
       __syncthreads();
 
       if (outIdx == maxOutputBoxes) {
-        return;
+        shouldBreak = true;
+        break;
+        // return;
       }
     }
+    if (shouldBreak) {
+      break;
+    }
   }
-  // __syncthreads();
-  // printf("generate boxes thread %d outIdx %d\n", threadIdx.x, outIdx);
+  __syncthreads();
+  if (threadIdx.x == 0) {
+    printf("Generate boxes outIdx %d\n", outIdx);
+    outBoxesCount[0] = outIdx;
+  }
 }
 
 void generateBoxesWithoutSoftmax(float *prob, int probWidth, int probHeight,
                                  float *reg, int regWidth, int regHeight,
                                  float *outProb, float *outReg,
-                                 float *outBboxes, int maxOutputBoxes,
-                                 float threshold, float scale,
-                                 cudaStream_t *stream) {
-  int grid = 1;
+                                 float *outBboxes, int *outBoxesCount,
+                                 int maxOutputBoxes, float threshold,
+                                 float scale, cudaStream_t *stream) {
+  const int grid = 1;
   const int block = 1024;
   const int tsize = 60;
-
   generateBoxesWithoutSoftmaxKernel<tsize, block><<<grid, block, 0, *stream>>>(
       prob, probWidth, probHeight, reg, regWidth, regHeight, outProb, outReg,
-      outBboxes, maxOutputBoxes, threshold, scale);
+      outBboxes, outBoxesCount, maxOutputBoxes, threshold, scale);
+}
+
+template <int BLOCK_THREADS>
+__launch_bounds__(BLOCK_THREADS) __global__
+    void regressAndSquareBoxesKernel(DevicePtr<float> boxes,
+                                     DevicePtr<float> reg,
+                                     DevicePtr<int> boxesCount,
+                                     bool shouldSquare) {
+  int boxesCount_ = *(boxesCount.get());
+  assert(boxesCount_ <= BLOCK_THREADS);
+
+  int boxIdx = threadIdx.x;
+  if (boxIdx < boxesCount_) {
+    float width = boxes[4 * boxIdx + 2] - boxes[4 * boxIdx + 0];
+    float height = boxes[4 * boxIdx + 3] - boxes[4 * boxIdx + 1];
+    boxes[4 * boxIdx + 0] += width * reg[4 * boxIdx + 0];
+    boxes[4 * boxIdx + 1] += height * reg[4 * boxIdx + 1];
+    boxes[4 * boxIdx + 2] += width * reg[4 * boxIdx + 2];
+    boxes[4 * boxIdx + 3] += height * reg[4 * boxIdx + 3];
+
+    if (shouldSquare) {
+      width = boxes[4 * boxIdx + 2] - boxes[4 * boxIdx + 0];
+      height = boxes[4 * boxIdx + 3] - boxes[4 * boxIdx + 1];
+      float maxSide = max(width, height);
+      float deltaWidth = (width - maxSide) / 2;
+      float deltaHeight = (height - maxSide) / 2;
+      boxes[4 * boxIdx + 0] += deltaWidth;
+      boxes[4 * boxIdx + 1] += deltaHeight;
+      boxes[4 * boxIdx + 2] -= deltaWidth;
+      boxes[4 * boxIdx + 3] -= deltaHeight;
+    }
+  }
+}
+
+void regressAndSquareBoxes(DevicePtr<float> boxes, DevicePtr<float> reg,
+                           DevicePtr<int> boxesCount, bool shouldSquare,
+                           cudaStream_t &stream) {
+  const int grid = 1;
+  const int block = 512;
+  regressAndSquareBoxesKernel<block>
+      <<<grid, block, 0, stream>>>(boxes, reg, boxesCount, shouldSquare);
+}
+
+/**
+ * NB: We cannot pass references to a kernel, they need to be passed by value
+ * It makes sense because a reference would exist on Host memory and cannot be
+ * accessed from the device.
+ */
+__global__ void scalarMultKernel(DevicePtr<float> p, size_t pSize,
+                                 float value) {
+  if (threadIdx.x < pSize) {
+    p[threadIdx.x] *= value;
+  }
+}
+
+void scalarMult(DevicePtr<float> p, size_t pSize, float value,
+                cudaStream_t &stream) {
+  scalarMultKernel<<<1, 128, 0, stream>>>(p, pSize, value);
 }

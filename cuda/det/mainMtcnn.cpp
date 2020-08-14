@@ -5,8 +5,8 @@
 #include <opencv2/imgproc.hpp>
 #include <string>
 
-#include "commonCuda.h"
 #include "mtcnn.h"
+#include "streamManager.hpp"
 
 #define IMAGE_PATH "/code/junk/tests/data/execs.jpg"
 
@@ -17,12 +17,9 @@ int main(int argc, char **argv) {
   image.convertTo(image, CV_32FC3);
   cv::resize(image, image, {1280, 720});
 
-  cudaStream_t stream;
-  CUDACHECK(cudaStreamCreate(&stream));
-
-  Mtcnn mtcnn{&stream};
-  mtcnn.predict(image, &stream);
-
-  CUDACHECK(cudaStreamDestroy(stream));
+  StreamManager streamManager;
+  Mtcnn mtcnn{streamManager.stream()};
+  mtcnn.predict(image, &streamManager.stream());
+  streamManager.synchronize();
   return 0;
 }

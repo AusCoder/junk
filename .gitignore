@@ -165,6 +165,7 @@ trtNetMain
 sort
 reduce
 moderngpuHello
+nicerDeviceApi
 
 cropTest.jpg
 

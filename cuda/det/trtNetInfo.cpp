@@ -1,5 +1,5 @@
 #include "trtNetInfo.h"
-#include "commonCuda.h"
+#include "commonCuda.hpp"
 
 #include <fstream>
 #include <json/json.h>
