@@ -33,24 +33,32 @@ void debugPrintVals(float *image, size_t numVals, size_t offset,
 void debugPrintVals(int *values, size_t numVals, size_t offset,
                     cudaStream_t *stream);
 
+/**
+ * NB: boxesCount should not be a multiple of 4 for the actual box sizes
+ *
+ * cropResizeCHW takes normalized boxes
+ */
 void cropResizeCHW(const float *image, int imageWidth, int imageHeight,
-                   int depth, const float *boxes, int boxesSize, int cropWidth,
-                   int cropHeight, float *croppedResizedImages,
+                   int depth, const float *boxes, DevicePtr<int> boxesCount,
+                   int cropWidth, int cropHeight, float *croppedResizedImages,
                    int croppedResizedImagesSize);
 
 void cropResizeCHW(const float *image, int imageWidth, int imageHeight,
-                   int depth, const float *boxes, int boxesSize, int cropWidth,
-                   int cropHeight, float *croppedResizedImages,
+                   int depth, const float *boxes, DevicePtr<int> boxesCount,
+                   int cropWidth, int cropHeight, float *croppedResizedImages,
                    int croppedResizedImagesSize, cudaStream_t *stream);
 
+/**
+ * cropResizeHWC takes denormalized boxes
+ */
 void cropResizeHWC(DevicePtr<float> image, int imageWidth, int imageHeight,
-                   int depth, DevicePtr<float> boxes, int boxesSize,
+                   int depth, DevicePtr<float> boxes, DevicePtr<int> boxesCount,
                    int cropWidth, int cropHeight,
                    DevicePtr<float> croppedResizedImages,
                    int croppedResizedImagesSize);
 
 void cropResizeHWC(DevicePtr<float> image, int imageWidth, int imageHeight,
-                   int depth, DevicePtr<float> boxes, int boxesSize,
+                   int depth, DevicePtr<float> boxes, DevicePtr<int> boxesCount,
                    int cropWidth, int cropHeight,
                    DevicePtr<float> croppedResizedImages,
                    int croppedResizedImagesSize, cudaStream_t &stream);
@@ -85,5 +93,27 @@ void regressAndSquareBoxes(DevicePtr<float> boxes, DevicePtr<float> reg,
 
 void scalarMult(DevicePtr<float> p, size_t pSize, float value,
                 cudaStream_t &stream);
+
+/**
+ * Grabs an element from each position in prob and writes to outProb.
+ * Equivalent of numpy:
+ *  prob = prob[:, 1]
+ *
+ * NB: this assumes that elements of prob are of size 2
+ */
+// void gatherProb(DevicePtr<float> prob, DevicePtr<int> probCount,
+//                 DevicePtr<float> outProb, int elementOffset,
+//                 cudaStream_t &stream);
+
+/**
+ * Assumes that prob element is of size 2, ie it is a softmax out of a net
+ * Write outProb element of size 1 taking the first element,
+ *  ie it does: prob = prob[:, 1]
+ */
+void probMask(DevicePtr<float> prob, DevicePtr<float> reg,
+              DevicePtr<float> boxes, DevicePtr<int> boxesCount,
+              DevicePtr<float> outProb, DevicePtr<float> outReg,
+              DevicePtr<float> outBoxes, DevicePtr<int> outBoxesCount,
+              int maxOutBoxes, float threshold, cudaStream_t &stream);
 
 #endif

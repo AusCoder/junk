@@ -36,6 +36,53 @@ struct PnetMemory {
   DeviceMemory<int> outputBoxesCount;
 };
 
+struct RnetMemory {
+  RnetMemory(int maxBoxesToProcess, const TrtNetInfo &netInfo);
+
+  RnetMemory(const RnetMemory &) = delete;
+  RnetMemory &operator=(const RnetMemory &) = delete;
+
+  DeviceMemory<float> croppedImages;
+
+  DeviceMemory<float> prob;
+  DeviceMemory<float> reg;
+
+  DeviceMemory<float> maskOutProb;
+  DeviceMemory<float> maskOutReg;
+  DeviceMemory<float> maskOutBoxes;
+  DeviceMemory<int> maskOutBoxesCount;
+
+  DeviceMemory<int> nmsSortIndices;
+  DeviceMemory<float> nmsOutProb;
+  DeviceMemory<float> outReg;
+  DeviceMemory<float> outBoxes;
+  DeviceMemory<int> outBoxesCount;
+};
+
+struct OnetMemory {
+  OnetMemory(int maxBoxesToProcess, const TrtNetInfo &netInfo);
+
+  OnetMemory(const OnetMemory &) = delete;
+  OnetMemory &operator=(const OnetMemory &) = delete;
+
+  DeviceMemory<float> croppedImages;
+
+  DeviceMemory<float> prob;
+  DeviceMemory<float> reg;
+  DeviceMemory<float> landmarks;
+
+  DeviceMemory<float> maskOutProb;
+  DeviceMemory<float> maskOutReg;
+  DeviceMemory<float> maskOutBoxes;
+  DeviceMemory<int> maskOutBoxesCount;
+
+  DeviceMemory<int> nmsSortIndices;
+  DeviceMemory<float> nmsOutProb;
+  DeviceMemory<float> outReg;
+  DeviceMemory<float> outBoxes;
+  DeviceMemory<int> outBoxesCount;
+};
+
 class Mtcnn {
 public:
   Mtcnn(cudaStream_t &stream);
@@ -49,13 +96,14 @@ public:
 
 private:
   void stageOne(cv::Mat image, cudaStream_t *stream);
+  void stageTwo(cudaStream_t &stream);
+  void stageThree(cudaStream_t &stream);
 
   std::vector<float> computeScales(int height, int width);
 
   int requiredImageHeight = 720;
   int requiredImageWidth = 1280;
   int requiredImageDepth = 3;
-  int dImageResizeBoxSize = 4;
 
   int maxBoxesToGenerate = 500;
 
@@ -66,15 +114,15 @@ private:
   float threshold3 = 0.95;
 
   std::map<std::pair<int, int>, TrtNet> pnets;
-  // TrtNet onet;
-  // TrtNet rnet;
+  TrtNet rnet;
+  TrtNet onet;
 
-  // float *dImage; // originalImage
-  // float *dImageResizeBox; // resize original image box
   DeviceMemory<float> dImage;
   DeviceMemory<float> dImageResizeBox;
+  DeviceMemory<int> dImageResizeBoxCount;
   PnetMemory pnetMemory;
-  // std::map<std::pair<int, int>, MtcnnPnetMemory> pnetMemory;
+  RnetMemory rnetMemory;
+  OnetMemory onetMemory;
 };
 
 #endif

@@ -8,7 +8,7 @@
 #include <vector>
 
 int main(int argc, char **argv) {
-  TrtNet net{TrtNet::createFromUffAndInfoFile("data/uff/pnet_216x384.uff")};
+  TrtNet net{TrtNet::createFromUffAndInfoFile(1, "data/uff/pnet_216x384.uff")};
   auto netInfo = net.getTrtNetInfo();
   std::cout << net.getTrtNetInfo().render() << "\n";
   net.start();

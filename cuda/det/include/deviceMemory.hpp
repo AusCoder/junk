@@ -134,6 +134,20 @@ void SetElementAsync(DeviceMemory<T> &dst, T value, cudaStream_t &stream) {
   CopyElementsAsync(static_cast<DevicePtr<T>>(dst), &value, 1, stream);
 }
 
+template <typename T>
+T GetElementAsync(DevicePtr<T> &src, cudaStream_t &stream) {
+  T value;
+  CopyElementsAsync(&value, src, 1, stream);
+  return value;
+}
+
+template <typename T>
+T GetElementAsync(DeviceMemory<T> &src, cudaStream_t &stream) {
+  T value;
+  CopyElementsAsync(&value, static_cast<DevicePtr<T>>(src), 1, stream);
+  return value;
+}
+
 /* Assumes that src has exactly dst.size() elements
  */
 template <typename T>

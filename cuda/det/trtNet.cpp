@@ -7,18 +7,30 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <utility>
 
-TrtNet::TrtNet(const std::string &p, const TrtNetInfo &i)
-    : modelPath{p}, trtNetInfo{i} {}
+TrtNet::TrtNet(int maxBatchSize_, const std::string &p, const TrtNetInfo &i)
+    : maxBatchSize{maxBatchSize_}, modelPath{p}, trtNetInfo{i} {}
 
 TrtNet::TrtNet(TrtNet &&net)
-    : builder{net.builder}, engine{net.engine}, context{net.context},
-      modelPath{net.modelPath}, trtNetInfo{net.trtNetInfo} {
+    : maxBatchSize{net.maxBatchSize}, builder{net.builder}, engine{net.engine},
+      context{net.context}, modelPath{net.modelPath}, trtNetInfo{
+                                                          net.trtNetInfo} {
+  net.maxBatchSize = 0;
   net.builder = nullptr;
   net.engine = nullptr;
   net.context = nullptr;
   net.modelPath = "";
   net.trtNetInfo = {};
+}
+
+TrtNet &TrtNet::operator=(TrtNet &&net) {
+  std::swap(maxBatchSize, net.maxBatchSize);
+  std::swap(builder, net.builder);
+  std::swap(engine, net.engine);
+  std::swap(context, net.context);
+  std::swap(modelPath, net.modelPath);
+  std::swap(trtNetInfo, net.trtNetInfo);
 }
 
 TrtNet::~TrtNet() {
@@ -42,10 +54,11 @@ const TensorInfo &TrtNet::getOutputTensorInfo(int i) const {
   return trtNetInfo.outputTensorInfos.at(i);
 }
 
-TrtNet TrtNet::createFromUffAndInfoFile(const std::string &uffPath) {
+TrtNet TrtNet::createFromUffAndInfoFile(int maxBatchSize,
+                                        const std::string &uffPath) {
   std::string infoPath = uffPath.substr(0, uffPath.rfind('.')) + "-info.json";
   TrtNetInfo netInfo{TrtNetInfo::readTrtNetInfo(infoPath)};
-  return {uffPath, netInfo};
+  return {maxBatchSize, uffPath, netInfo};
 }
 
 /**
@@ -66,7 +79,8 @@ void TrtNet::start() {
     // else {
     // throw std::
     // }
-    parser->registerInput(tensorInfo.name.c_str(), tensorInfo.shape, order);
+    parser->registerInput(tensorInfo.name.c_str(), tensorInfo.getInputDims(),
+                          order);
   }
   for (auto &tensorInfo : trtNetInfo.outputTensorInfos) {
     parser->registerOutput(tensorInfo.name.c_str());
@@ -74,7 +88,7 @@ void TrtNet::start() {
 
   parser->parse(modelPath.c_str(), *network, nvinfer1::DataType::kFLOAT);
 
-  builder->setMaxBatchSize(1);
+  builder->setMaxBatchSize(maxBatchSize);
   nvinfer1::IBuilderConfig *config = builder->createBuilderConfig();
   config->setMaxWorkspaceSize(1 << 30);
   engine = builder->buildEngineWithConfig(*network, *config);

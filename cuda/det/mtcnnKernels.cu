@@ -150,7 +150,8 @@ void nmsSimple(float *boxes, size_t boxesSize, float *outBoxes,
 
 template <int BLOCK_THREADS, int ITEMS_PER_THREAD>
 __launch_bounds__(BLOCK_THREADS) __global__
-    void sortProb(DevicePtr<float> prob, DevicePtr<int> size, DevicePtr<int> outIndices) {
+    void sortProb(DevicePtr<float> prob, DevicePtr<int> size,
+                  DevicePtr<int> outIndices) {
   typedef cub::BlockLoad<float, BLOCK_THREADS, ITEMS_PER_THREAD> BlockLoad;
   typedef cub::BlockRadixSort<float, BLOCK_THREADS, ITEMS_PER_THREAD, int>
       BlockRadixSort;
@@ -183,13 +184,11 @@ __launch_bounds__(BLOCK_THREADS) __global__
                    DevicePtr<int> sortIndices, DevicePtr<float> outProb,
                    DevicePtr<float> outReg, DevicePtr<float> outBoxes,
                    DevicePtr<int> outBoxesPosition, float iouThreshold) {
-  // rename maxBoxIdx to boxIdxsSize? It's not an index, it's a size
-  // int maxBoxIdx = boxes.size() / 4;
   int boxesCount_ = *(boxesCount.get());
-  size_t outProbSize = outProb.size();
   assert(boxesCount_ <= BLOCK_THREADS);
-  assert(outReg.size() == 4 * outProbSize);
-  assert(outBoxes.size() == 4 * outProbSize);
+  assert(outReg.size() == 4 * outProb.size());
+  assert(outBoxes.size() == 4 * outProb.size());
+  size_t outBoxesSize = outBoxes.size() / 4;
 
   __shared__ bool keptBoxes[BLOCK_THREADS];
 
@@ -211,7 +210,7 @@ __launch_bounds__(BLOCK_THREADS) __global__
   int outIdx = *(outBoxesPosition.get());
   int refBoxSortIdx = 0;
 
-  while ((refBoxSortIdx < boxesCount_) && (outIdx < outProbSize)) {
+  while ((refBoxSortIdx < boxesCount_) && (outIdx < outBoxesSize)) {
     int refBoxIdx = sortIndices[refBoxSortIdx];
     BBox refBox{boxes[4 * refBoxIdx + 0], boxes[4 * refBoxIdx + 1],
                 boxes[4 * refBoxIdx + 2], boxes[4 * refBoxIdx + 3]};
@@ -270,9 +269,9 @@ void nms(DevicePtr<float> prob, DevicePtr<float> reg, DevicePtr<float> boxes,
 // gridSize...
 __global__ void
 cropResizeCHWKernel(const float *image, int imageWidth, int imageHeight,
-                    int depth, const float *boxes, int boxesSize, int cropWidth,
-                    int cropHeight, float *croppedResizedImages,
-                    int croppedResizedImagesSize // == boxesSize * depth *
+                    int depth, const float *boxes, DevicePtr<int> boxesCount,
+                    int cropWidth, int cropHeight, float *croppedResizedImages,
+                    int croppedResizedImagesSize // == boxesCount * depth *
                                                  // cropWidth * cropHeight
 ) {
   // Assume that the depth is 3 for now
@@ -296,7 +295,7 @@ cropResizeCHWKernel(const float *image, int imageWidth, int imageHeight,
     const float y2 = boxes[boxIdx * 4 + 2];
     const float x2 = boxes[boxIdx * 4 + 3];
 
-    const int batchIdx = boxIdx / boxesSize;
+    const int batchIdx = boxIdx / *(boxesCount.get());
     if (batchIdx < 0 || batchIdx >= batch) {
       continue;
     }
@@ -353,13 +352,17 @@ cropResizeCHWKernel(const float *image, int imageWidth, int imageHeight,
 
 __global__ void
 cropResizeHWCKernel(DevicePtr<float> image, int imageWidth, int imageHeight,
-                    int depth, DevicePtr<float> boxes, int boxesSize,
-                    int cropWidth, int cropHeight,
+                    int depth, DevicePtr<float> boxes,
+                    DevicePtr<int> boxesCount, int cropWidth, int cropHeight,
                     DevicePtr<float> croppedResizedImages,
-                    int croppedResizedImagesSize // == boxesSize * cropWidth *
+                    int croppedResizedImagesSize_ // == boxesCount * cropWidth *
                                                  // cropHeight * depth
 ) {
   // Assume that the depth is 3 for now
+  // TODO: I should calculate croppedResizedImagesSize as *(boxesCount.get()) *
+  // cropWidth * cropHeight * depth
+  // TODO: What do I do about this?
+  int croppedResizedImagesSize = *boxesCount.get() * cropWidth * cropHeight * depth;
 
   const float extrapolationValue = 0.0f;
   const int batch = 1;
@@ -383,12 +386,18 @@ cropResizeHWCKernel(DevicePtr<float> image, int imageWidth, int imageHeight,
     idx /= cropHeight;
     const int boxIdx = idx;
 
-    const float y1 = boxes[boxIdx * 4];
-    const float x1 = boxes[boxIdx * 4 + 1];
-    const float y2 = boxes[boxIdx * 4 + 2];
-    const float x2 = boxes[boxIdx * 4 + 3];
+    // const float y1 = boxes[boxIdx * 4 + 0] / ;
+    // const float x1 = boxes[boxIdx * 4 + 1];
+    // const float y2 = boxes[boxIdx * 4 + 2];
+    // const float x2 = boxes[boxIdx * 4 + 3];
+    const float x1 = boxes[boxIdx * 4 + 0] / imageWidth;
+    const float y1 = boxes[boxIdx * 4 + 1] / imageHeight;
+    const float x2 = boxes[boxIdx * 4 + 2] / imageWidth;
+    const float y2 = boxes[boxIdx * 4 + 3] / imageHeight;
 
-    const int batchIdx = boxIdx / boxesSize;
+    // Here we are saying that boxesCount is not a multiple of 4
+    // So I need to remember this when passing this param!!!
+    const int batchIdx = boxIdx / *(boxesCount.get());
     if (batchIdx < 0 || batchIdx >= batch) {
       continue;
     }
@@ -447,48 +456,50 @@ cropResizeHWCKernel(DevicePtr<float> image, int imageWidth, int imageHeight,
 }
 
 void cropResizeCHW(const float *image, int imageWidth, int imageHeight,
-                   int depth, const float *boxes, int boxesSize, int cropWidth,
-                   int cropHeight, float *croppedResizedImages,
-                   int croppedResizedImagesSize // == boxesSize * cropWidth *
+                   int depth, const float *boxes, DevicePtr<int> boxesCount,
+                   int cropWidth, int cropHeight, float *croppedResizedImages,
+                   int croppedResizedImagesSize // == boxesCount * cropWidth *
                                                 // cropHeight * depth
 ) {
   const int block = 1024;
   const int grid = (croppedResizedImagesSize + block - 1) / block;
 
   cropResizeCHWKernel<<<grid, block>>>(
-      image, imageWidth, imageHeight, depth, boxes, boxesSize, cropWidth,
+      image, imageWidth, imageHeight, depth, boxes, boxesCount, cropWidth,
       cropHeight, croppedResizedImages, croppedResizedImagesSize);
 }
 
 void cropResizeCHW(const float *image, int imageWidth, int imageHeight,
-                   int depth, const float *boxes, int boxesSize, int cropWidth,
-                   int cropHeight, float *croppedResizedImages,
+                   int depth, const float *boxes, DevicePtr<int> boxesCount,
+                   int cropWidth, int cropHeight, float *croppedResizedImages,
                    int croppedResizedImagesSize, cudaStream_t *stream) {
   const int block = 1024;
   const int grid = (croppedResizedImagesSize + block - 1) / block;
 
   cropResizeCHWKernel<<<grid, block, 0, *stream>>>(
-      image, imageWidth, imageHeight, depth, boxes, boxesSize, cropWidth,
+      image, imageWidth, imageHeight, depth, boxes, boxesCount, cropWidth,
       cropHeight, croppedResizedImages, croppedResizedImagesSize);
 }
 
 void cropResizeHWC(DevicePtr<float> image, int imageWidth, int imageHeight,
-                   int depth, DevicePtr<float> boxes, int boxesSize,
+                   int depth, DevicePtr<float> boxes, DevicePtr<int> boxesCount,
+
                    int cropWidth, int cropHeight,
                    DevicePtr<float> croppedResizedImages,
-                   int croppedResizedImagesSize // == boxesSize * cropWidth *
+                   int croppedResizedImagesSize // == boxesCount * cropWidth *
                                                 // cropHeight * depth
 ) {
   const int block = 512;
   const int grid = (croppedResizedImagesSize + block - 1) / block;
 
   cropResizeHWCKernel<<<grid, block>>>(
-      image, imageWidth, imageHeight, depth, boxes, boxesSize, cropWidth,
+      image, imageWidth, imageHeight, depth, boxes, boxesCount, cropWidth,
       cropHeight, croppedResizedImages, croppedResizedImagesSize);
 }
 
 void cropResizeHWC(DevicePtr<float> image, int imageWidth, int imageHeight,
-                   int depth, DevicePtr<float> boxes, int boxesSize,
+                   int depth, DevicePtr<float> boxes, DevicePtr<int> boxesCount,
+
                    int cropWidth, int cropHeight,
                    DevicePtr<float> croppedResizedImages,
                    int croppedResizedImagesSize, cudaStream_t &stream) {
@@ -496,7 +507,7 @@ void cropResizeHWC(DevicePtr<float> image, int imageWidth, int imageHeight,
   const int grid = (croppedResizedImagesSize + block - 1) / block;
 
   cropResizeHWCKernel<<<grid, block, 0, stream>>>(
-      image, imageWidth, imageHeight, depth, boxes, boxesSize, cropWidth,
+      image, imageWidth, imageHeight, depth, boxes, boxesCount, cropWidth,
       cropHeight, croppedResizedImages, croppedResizedImagesSize);
 }
 
@@ -612,10 +623,10 @@ __global__ void generateBoxesWithoutSoftmaxKernel(
 
   assert(probWidth == regWidth);
   assert(probHeight == regHeight);
-  int probSize = probWidth * probHeight;
+  int probCount = probWidth * probHeight;
 
   for (int i = 0; i < TSIZE; i++) {
-    if (i * DIM + threadIdx.x < probSize) {
+    if (i * DIM + threadIdx.x < probCount) {
       thisThreadProbs[2 * i] = prob[2 * (i * DIM + threadIdx.x)];
       thisThreadProbs[2 * i + 1] = prob[2 * (i * DIM + threadIdx.x) + 1];
     }
@@ -627,7 +638,7 @@ __global__ void generateBoxesWithoutSoftmaxKernel(
     for (int j = 0; j < DIM; j++) {
       int offset = i * DIM;
       int index = offset + j;
-      if (index >= probSize) {
+      if (index >= probCount) {
         break;
       }
 
@@ -638,6 +649,8 @@ __global__ void generateBoxesWithoutSoftmaxKernel(
         float p0 = thisThreadProbs[2 * i];
         float p1 = thisThreadProbs[2 * i + 1];
 
+        // TODO: I can probably avoid calculating these exp's and just transform
+        // the threshold
         p0 = expf(p0);
         p1 = expf(p1);
         float softmax = p1 / (p0 + p1);
@@ -676,7 +689,7 @@ __global__ void generateBoxesWithoutSoftmaxKernel(
     }
   }
   __syncthreads();
-  if (threadIdx.x == 0) {
+  if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0) {
     printf("Generate boxes outIdx %d\n", outIdx);
     outBoxesCount[0] = outIdx;
   }
@@ -688,9 +701,10 @@ void generateBoxesWithoutSoftmax(float *prob, int probWidth, int probHeight,
                                  float *outBboxes, int *outBoxesCount,
                                  int maxOutputBoxes, float threshold,
                                  float scale, cudaStream_t *stream) {
+  // These are probably way too big
   const int grid = 1;
-  const int block = 1024;
-  const int tsize = 60;
+  const int block = 512;
+  const int tsize = 30;
   generateBoxesWithoutSoftmaxKernel<tsize, block><<<grid, block, 0, *stream>>>(
       prob, probWidth, probHeight, reg, regWidth, regHeight, outProb, outReg,
       outBboxes, outBoxesCount, maxOutputBoxes, threshold, scale);
@@ -752,4 +766,108 @@ __global__ void scalarMultKernel(DevicePtr<float> p, size_t pSize,
 void scalarMult(DevicePtr<float> p, size_t pSize, float value,
                 cudaStream_t &stream) {
   scalarMultKernel<<<1, 128, 0, stream>>>(p, pSize, value);
+}
+
+// template<int BLOCK_THREADS>
+// __launch_bounds__(BLOCK_THREADS)
+// __global__ void gatherProbKernel(DevicePtr<float> prob, DevicePtr<int>
+// probCount,
+//   DevicePtr<float> outProb, int elementOffset) {
+//     int probCount_ = *(probCount.get());
+//     // Might need to tile at some point, if we have lots of boxes (ie
+//     probCount_ > BLOCK_THREADS) assert(probCount_ <= BLOCK_THREADS); if
+//     (threadIdx.x < probCount_) {
+//       int probIdx = threadIdx.x * 2 + elementOffset;
+//       outProb[threadIdx.x] = prob[probIdx];
+//     }
+//   }
+
+// void gatherProb(DevicePtr<float> prob, DevicePtr<int> probCount,
+//   DevicePtr<float> outProb, int elementOffset, cudaStream_t &stream) {
+//     gatherProbKernel<512><<<1, 512, 0, stream>>>(prob, probCount, outProb,
+//     elementOffset);
+//   }
+
+template <int BLOCK_THREADS, int ITEMS_PER_THREAD>
+__launch_bounds__(BLOCK_THREADS) __global__
+    void probMaskKernel(DevicePtr<float> prob, DevicePtr<float> reg,
+                        DevicePtr<float> boxes, DevicePtr<int> boxesCount,
+                        DevicePtr<float> outProb, DevicePtr<float> outReg,
+                        DevicePtr<float> outBoxes, DevicePtr<int> outBoxesCount,
+                        int maxOutBoxes, float threshold) {
+  assert(blockDim.x == BLOCK_THREADS);
+
+  __shared__ int outIdx;
+  if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0) {
+    outIdx = 0;
+  }
+
+  float thisThreadProbs[2 * ITEMS_PER_THREAD];
+  int boxesCount_ = *(boxesCount.get());
+
+  // NB: This is like one of the CUB Load methods
+  for (int i = 0; i < ITEMS_PER_THREAD; i++) {
+    int threadOffset = i * BLOCK_THREADS + threadIdx.x;
+    if (threadOffset < boxesCount_) {
+      // NB: We only care about p1, so we don't need to copy both!
+      thisThreadProbs[2 * i] = prob[2 * threadOffset];
+      thisThreadProbs[2 * i + 1] = prob[2 * threadOffset + 1];
+    }
+  }
+
+  bool shouldBreak = false;
+
+  for (int i = 0; i < ITEMS_PER_THREAD; i++) {
+    for (int j = 0; j < BLOCK_THREADS; j++) {
+      int offset = i * BLOCK_THREADS;
+      int index = offset + j;
+      if (index >= boxesCount_) {
+        break;
+      }
+
+      __syncthreads();
+      if (threadIdx.x == j) {
+        float p1 = thisThreadProbs[2 * i + 1];
+        if (p1 > threshold) {
+          outProb[outIdx] = p1;
+          outReg[4 * outIdx + 0] = reg[4 * outIdx + 0];
+          outReg[4 * outIdx + 1] = reg[4 * outIdx + 1];
+          outReg[4 * outIdx + 2] = reg[4 * outIdx + 2];
+          outReg[4 * outIdx + 3] = reg[4 * outIdx + 3];
+          outBoxes[4 * outIdx + 0] = boxes[4 * outIdx + 0];
+          outBoxes[4 * outIdx + 1] = boxes[4 * outIdx + 1];
+          outBoxes[4 * outIdx + 2] = boxes[4 * outIdx + 2];
+          outBoxes[4 * outIdx + 3] = boxes[4 * outIdx + 3];
+          outIdx++;
+        }
+      }
+      __syncthreads();
+      if (outIdx == maxOutBoxes) {
+        shouldBreak = true;
+        break;
+      }
+    }
+    if (shouldBreak) {
+      break;
+    }
+  }
+  __syncthreads();
+  if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0) {
+    printf("probMask outIdx: %d\n", outIdx);
+    outBoxesCount[0] = outIdx;
+  }
+}
+
+void probMask(DevicePtr<float> prob, DevicePtr<float> reg,
+              DevicePtr<float> boxes, DevicePtr<int> boxesCount,
+              DevicePtr<float> outProb, DevicePtr<float> outReg,
+              DevicePtr<float> outBoxes, DevicePtr<int> outBoxesCount,
+              int maxOutBoxes, float threshold, cudaStream_t &stream) {
+  // NB: these are way too big
+  const int grid = 1;
+  const int block = 512;
+  const int itemsPerThread = 30;
+  probMaskKernel<block, itemsPerThread><<<grid, block, 0, stream>>>(
+      prob, reg, boxes, boxesCount, outProb, outReg, outBoxes, outBoxesCount,
+      maxOutBoxes, threshold);
 }

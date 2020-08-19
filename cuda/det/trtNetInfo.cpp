@@ -1,15 +1,17 @@
 #include "trtNetInfo.h"
 #include "commonCuda.hpp"
 
+#include <algorithm>
 #include <fstream>
 #include <json/json.h>
+#include <numeric>
 #include <sstream>
 #include <stdexcept>
 
-TensorInfo::TensorInfo(std::string n, nvinfer1::Dims3 s, TensorInputOrder i)
+TensorInfo::TensorInfo(std::string n, std::vector<int> s, TensorInputOrder i)
     : name{n}, shape{s}, inputOrder{i} {}
 
-TensorInfo::TensorInfo(std::string n, nvinfer1::Dims3 s)
+TensorInfo::TensorInfo(std::string n, std::vector<int> s)
     : name{n}, shape{s}, inputOrder{TensorInputOrder::None} {}
 
 std::string TensorInfo::render() const {
@@ -20,15 +22,20 @@ std::string TensorInfo::render() const {
   } else {
     orderStr = "None";
   }
-  ss << "TensorInfo(name=" << name << ", shape=(" << shape.d[0] << ", "
-     << shape.d[1] << ", " << shape.d[2] << ")"
+  ss << "TensorInfo(name=" << name << ", shape=(" << shape.at(0) << ", "
+     << shape.at(1) << ", " << shape.at(2) << ")"
      << ", order=" << orderStr << ")";
   return ss.str();
 }
 
-int TensorInfo::getHeight() const { return shape.d[0]; }
-int TensorInfo::getWidth() const { return shape.d[1]; }
-int TensorInfo::volume() const { return dimsSize(shape); }
+int TensorInfo::getHeight() const { return shape.at(0); }
+int TensorInfo::getWidth() const { return shape.at(1); }
+int TensorInfo::volume() const {
+  return std::accumulate(shape.begin(), shape.end(), 1, std::multiplies<int>());
+}
+nvinfer1::Dims3 TensorInfo::getInputDims() const {
+  return {shape.at(0), shape.at(1), shape.at(2)};
+}
 
 std::string TrtNetInfo::render() const {
   std::stringstream ss;
@@ -52,8 +59,8 @@ static std::string jsonGetString(const Json::Value &v, const std::string &key) {
   }
 }
 
-static nvinfer1::Dims3 jsonGetShape(const Json::Value &v,
-                                    const std::string &key) {
+static std::vector<int> jsonGetShape(const Json::Value &v,
+                                     const std::string &key) {
   std::vector<int> ds;
   if (v.isMember(key) && v[key].isArray()) {
     for (auto &v : v[key]) {
@@ -61,13 +68,13 @@ static nvinfer1::Dims3 jsonGetShape(const Json::Value &v,
         ds.push_back(v.asInt());
       }
     }
-    if (ds.size() != 3) {
+    if (!(ds.size() == 1 or ds.size() == 3)) {
       throw std::invalid_argument("Unexpected number of dims in shape");
     }
   } else {
     throw std::invalid_argument(key + " key not valid");
   }
-  return nvinfer1::Dims3{ds[0], ds[1], ds[2]};
+  return ds;
 }
 
 TrtNetInfo TrtNetInfo::readTrtNetInfo(const std::string &netInfoPath) {
@@ -79,17 +86,12 @@ TrtNetInfo TrtNetInfo::readTrtNetInfo(const std::string &netInfoPath) {
     reader.parse(netInfoFile, value);
     if (value.isMember("inputs") && value["inputs"].isArray()) {
       for (auto &v : value["inputs"]) {
-        TensorInputOrder inputOrder;
-        std::string name;
-        nvinfer1::Dims3 dims;
-
+        TensorInputOrder inputOrder{TensorInputOrder::None};
         if (jsonGetString(v, "format") == "NHWC") {
           inputOrder = TensorInputOrder::NHWC;
-        } else {
-          inputOrder = TensorInputOrder::None;
         }
-        name = jsonGetString(v, "name");
-        dims = jsonGetShape(v, "shape");
+        auto name = jsonGetString(v, "name");
+        auto dims = jsonGetShape(v, "shape");
         netInfo.inputTensorInfos.push_back({name, dims, inputOrder});
       }
     } else {
@@ -98,11 +100,8 @@ TrtNetInfo TrtNetInfo::readTrtNetInfo(const std::string &netInfoPath) {
 
     if (value.isMember("outputs")) {
       for (auto &v : value["outputs"]) {
-        std::string name;
-        nvinfer1::Dims3 dims;
-
-        name = jsonGetString(v, "name");
-        dims = jsonGetShape(v, "shape");
+        auto name = jsonGetString(v, "name");
+        auto dims = jsonGetShape(v, "shape");
         netInfo.outputTensorInfos.push_back({name, dims});
       }
     } else {

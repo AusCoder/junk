@@ -20,13 +20,13 @@ and Contexts etc.
 
 class TrtNet {
 public:
-  TrtNet(const std::string &p, const TrtNetInfo &i);
+  TrtNet(int maxBatchSize_, const std::string &p, const TrtNetInfo &i);
   ~TrtNet();
   TrtNet(TrtNet &&net);
+  TrtNet &operator=(TrtNet &&net);
 
   TrtNet(const TrtNet &) = delete;
   TrtNet &operator=(const TrtNet &) = delete;
-  TrtNet &operator=(TrtNet &&) = delete;
 
   void start();
 
@@ -42,9 +42,11 @@ public:
   const TensorInfo &getInputTensorInfo(int i) const;
   const TensorInfo &getOutputTensorInfo(int i) const;
 
-  static TrtNet createFromUffAndInfoFile(const std::string &uffPath);
+  static TrtNet createFromUffAndInfoFile(int maxBatchSize,
+                                         const std::string &uffPath);
 
 private:
+  int maxBatchSize;
   bool isStarted = false;
   nvinfer1::IBuilder *builder = nullptr;
   nvinfer1::ICudaEngine *engine = nullptr;

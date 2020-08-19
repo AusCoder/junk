@@ -9,17 +9,19 @@
 enum class TensorInputOrder { None, NHWC };
 
 struct TensorInfo {
-  TensorInfo(std::string n, nvinfer1::Dims3 s, TensorInputOrder i);
-  TensorInfo(std::string n, nvinfer1::Dims3 s);
+  TensorInfo(std::string n, std::vector<int> s, TensorInputOrder i);
+  TensorInfo(std::string n, std::vector<int> s);
 
   std::string name;
-  nvinfer1::Dims3 shape;
+  // nvinfer1::Dims3 shape;
+  std::vector<int> shape;
   TensorInputOrder inputOrder;
 
   int getHeight() const;
   int getWidth() const;
   int volume() const;
   std::string render() const;
+  nvinfer1::Dims3 getInputDims() const;
 };
 
 struct TrtNetInfo {

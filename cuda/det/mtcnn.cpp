@@ -15,11 +15,16 @@
 #include "mtcnnKernels.h"
 
 static std::map<std::pair<int, int>, TrtNet> createPnets() {
-  std::vector<std::string> uffPaths{"data/uff/pnet_216x384.uff"};
+  std::vector<std::string> uffPaths{
+      "data/uff/pnet_14x25.uff",   "data/uff/pnet_20x35.uff",
+      "data/uff/pnet_28x49.uff",   "data/uff/pnet_39x69.uff",
+      "data/uff/pnet_55x98.uff",   "data/uff/pnet_77x137.uff",
+      "data/uff/pnet_109x194.uff", "data/uff/pnet_154x273.uff",
+      "data/uff/pnet_216x384.uff"};
   std::map<std::pair<int, int>, TrtNet> pnets;
   for (auto &uffPath : uffPaths) {
-    TrtNet net{TrtNet::createFromUffAndInfoFile(uffPath)};
-    const auto &tensorInfo = net.getTrtNetInfo().inputTensorInfos[0];
+    TrtNet net{TrtNet::createFromUffAndInfoFile(1, uffPath)};
+    const auto &tensorInfo = net.getTrtNetInfo().inputTensorInfos.at(0);
     auto inputHeightWidth =
         std::make_pair(tensorInfo.getHeight(), tensorInfo.getWidth());
     pnets.emplace(std::make_pair(inputHeightWidth, std::move(net)));
@@ -58,12 +63,14 @@ static void debugSaveDeviceImage(DevicePtr<float> image, int imageWidth,
 static void debugSaveDeviceImage(DevicePtr<float> image, int imageWidth,
                                  int imageHeight, int depth,
                                  DevicePtr<float> boxes,
+                                 DevicePtr<int> boxesCount,
                                  const std::string &outPath,
                                  cudaStream_t *stream) {
   auto mat = debugGetDeviceImage(image, imageWidth, imageHeight, depth, stream);
   auto hBoxes = boxes.asVec(*stream);
+  auto hBoxesCount = GetElementAsync(boxesCount, *stream);
   CUDACHECK(cudaStreamSynchronize(*stream));
-  for (size_t i = 0; i < hBoxes.size() / 4; i++) {
+  for (int i = 0; i < hBoxesCount; i++) {
     cv::Point p1{static_cast<int>(hBoxes.at(4 * i + 0)),
                  static_cast<int>(hBoxes.at(4 * i + 1))};
     cv::Point p2{static_cast<int>(hBoxes.at(4 * i + 2)),
@@ -84,7 +91,7 @@ maxSizePnetInfo(const std::map<std::pair<int, int>, TrtNet> &pnets) {
 PnetMemory::PnetMemory(int batchSize, int maxBoxesToGenerate,
                        const TrtNetInfo &netInfo)
     : resizedImage{DeviceMemory<float>::AllocateElements(
-          batchSize * netInfo.inputTensorInfos[0].volume())},
+          batchSize * netInfo.inputTensorInfos.at(0).volume())},
       prob{DeviceMemory<float>::AllocateElements(
           batchSize * netInfo.outputTensorInfos.at(0).volume())},
       reg{DeviceMemory<float>::AllocateElements(
@@ -103,13 +110,62 @@ PnetMemory::PnetMemory(int batchSize, int maxBoxesToGenerate,
           DeviceMemory<float>::AllocateElements(4 * maxBoxesToGenerate)},
       outputBoxesCount{DeviceMemory<int>::AllocateElements(1)} {}
 
+RnetMemory::RnetMemory(int maxBoxesToProcess, const TrtNetInfo &netInfo)
+    : croppedImages{DeviceMemory<float>::AllocateElements(
+          maxBoxesToProcess * netInfo.inputTensorInfos.at(0).volume())},
+      prob{DeviceMemory<float>::AllocateElements(
+          maxBoxesToProcess * netInfo.outputTensorInfos.at(0).volume())},
+      reg{DeviceMemory<float>::AllocateElements(
+          maxBoxesToProcess * netInfo.outputTensorInfos.at(1).volume())},
+      maskOutProb{DeviceMemory<float>::AllocateElements(maxBoxesToProcess)},
+      maskOutReg{DeviceMemory<float>::AllocateElements(4 * maxBoxesToProcess)},
+      maskOutBoxes{
+          DeviceMemory<float>::AllocateElements(4 * maxBoxesToProcess)},
+      maskOutBoxesCount{DeviceMemory<int>::AllocateElements(1)},
+      nmsSortIndices{DeviceMemory<int>::AllocateElements(maxBoxesToProcess)},
+      nmsOutProb{DeviceMemory<float>::AllocateElements(maxBoxesToProcess)},
+      outReg{DeviceMemory<float>::AllocateElements(4 * maxBoxesToProcess)},
+      outBoxes{DeviceMemory<float>::AllocateElements(4 * maxBoxesToProcess)},
+      outBoxesCount{DeviceMemory<int>::AllocateElements(1)} {
+  assert(netInfo.inputTensorInfos.at(0).volume() == 24 * 24 * 3);
+  assert(prob.size() == maxBoxesToProcess * 2);
+  assert(reg.size() == maxBoxesToProcess * 4);
+}
+
+OnetMemory::OnetMemory(int maxBoxesToProcess, const TrtNetInfo &netInfo)
+    : croppedImages{DeviceMemory<float>::AllocateElements(
+          maxBoxesToProcess * netInfo.inputTensorInfos.at(0).volume())},
+      prob{DeviceMemory<float>::AllocateElements(
+          maxBoxesToProcess * netInfo.outputTensorInfos.at(0).volume())},
+      reg{DeviceMemory<float>::AllocateElements(
+          maxBoxesToProcess * netInfo.outputTensorInfos.at(1).volume())},
+      landmarks{DeviceMemory<float>::AllocateElements(
+          maxBoxesToProcess * netInfo.outputTensorInfos.at(2).volume())},
+      maskOutProb{DeviceMemory<float>::AllocateElements(maxBoxesToProcess)},
+      maskOutReg{DeviceMemory<float>::AllocateElements(4 * maxBoxesToProcess)},
+      maskOutBoxes{
+          DeviceMemory<float>::AllocateElements(4 * maxBoxesToProcess)},
+      maskOutBoxesCount{DeviceMemory<int>::AllocateElements(1)},
+      nmsSortIndices{DeviceMemory<int>::AllocateElements(maxBoxesToProcess)},
+      nmsOutProb{DeviceMemory<float>::AllocateElements(maxBoxesToProcess)},
+      outReg{DeviceMemory<float>::AllocateElements(4 * maxBoxesToProcess)},
+      outBoxes{DeviceMemory<float>::AllocateElements(4 * maxBoxesToProcess)},
+      outBoxesCount{DeviceMemory<int>::AllocateElements(1)} {}
+
+// TODO: is the batch size of rnet way too big?
+// Should I make it smaller and batch the input?
 Mtcnn::Mtcnn(cudaStream_t &stream)
-    : pnets{createPnets()}, dImage{DeviceMemory<float>::AllocateElements(
-                                requiredImageWidth * requiredImageHeight *
-                                requiredImageDepth)},
-      dImageResizeBox{
-          DeviceMemory<float>::AllocateElements(dImageResizeBoxSize)},
-      pnetMemory{1, maxBoxesToGenerate, maxSizePnetInfo(pnets)} {
+    : pnets{createPnets()}, rnet{TrtNet::createFromUffAndInfoFile(
+                                maxBoxesToGenerate, "data/uff/rnet.uff")},
+      onet{TrtNet::createFromUffAndInfoFile(maxBoxesToGenerate,
+                                            "data/uff/onet.uff")},
+      dImage{DeviceMemory<float>::AllocateElements(
+          requiredImageWidth * requiredImageHeight * requiredImageDepth)},
+      dImageResizeBox{DeviceMemory<float>::AllocateElements(4)},
+      dImageResizeBoxCount{DeviceMemory<int>::AllocateElements(1)},
+      pnetMemory{1, maxBoxesToGenerate, maxSizePnetInfo(pnets)},
+      rnetMemory{maxBoxesToGenerate, rnet.getTrtNetInfo()},
+      onetMemory{maxBoxesToGenerate, onet.getTrtNetInfo()} {
   // std::map<std::pair<int, int>, TrtNetInfo> netInfos;
   // This is mapping of a dict and inserting into a new dict
   // std::transform(pnets.begin(), pnets.end(),
@@ -129,14 +185,20 @@ Mtcnn::Mtcnn(cudaStream_t &stream)
 
   std::for_each(pnets.begin(), pnets.end(),
                 [](auto &net) -> void { net.second.start(); });
+  rnet.start();
+  onet.start();
 
-  CopyAllElementsAsync(static_cast<DevicePtr<float>>(dImageResizeBox),
-                       {0.0, 0.0, 1.0, 1.0}, stream);
+  CopyAllElementsAsync(dImageResizeBox,
+                       {0.0, 0.0, requiredImageWidth, requiredImageHeight},
+                       stream);
+  SetElementAsync(dImageResizeBoxCount, 1, stream);
 }
 
 void Mtcnn::predict(cv::Mat image, cudaStream_t *stream) {
   image.convertTo(image, CV_32FC3);
-  Mtcnn::stageOne(image, stream);
+  stageOne(image, stream);
+  stageTwo(*stream);
+  stageThree(*stream);
 }
 
 void Mtcnn::stageOne(cv::Mat image, cudaStream_t *stream) {
@@ -181,21 +243,21 @@ void Mtcnn::stageOne(cv::Mat image, cudaStream_t *stream) {
     // - other buffers for nms indices (as required)
     //    - makes sense to roll lots of these into a mega kernel I think
 
-    auto &resizedHeightWidth = pnetWithSize.first;
+    // auto &resizedHeightWidth = pnetWithSize.first;
+    auto &resizedHeight = pnetWithSize.first.first;
+    auto &resizedWidth = pnetWithSize.first.second;
     auto &pnet = pnetWithSize.second;
-    float scale = static_cast<float>(resizedHeightWidth.first) / imageHeight;
-    std::cout << scale << ", " << resizedHeightWidth.first << ", "
-              << resizedHeightWidth.second << "\n";
+    float scale = static_cast<float>(resizedHeight) / imageHeight;
+    std::cout << scale << ", " << resizedHeight << ", " << resizedWidth << "\n";
     // auto &buffers = pnetMemory.at(resizedHeightWidth);
 
-    assert(pnetMemory.resizedImage.size() ==
-           static_cast<std::size_t>(resizedHeightWidth.first *
-                                    resizedHeightWidth.second * depth));
-    cropResizeHWC(dImage, imageWidth, imageHeight, depth, dImageResizeBox,
-                  dImageResizeBoxSize, resizedHeightWidth.second,
-                  resizedHeightWidth.first, pnetMemory.resizedImage,
-                  resizedHeightWidth.first * resizedHeightWidth.second * depth,
-                  *stream);
+    // assert(pnetMemory.resizedImage.size() ==
+    //        static_cast<std::size_t>(resizedHeightWidth.first *
+    //                                 resizedHeightWidth.second * depth));
+    cropResizeHWC(dImage, requiredImageWidth, requiredImageHeight,
+                  requiredImageDepth, dImageResizeBox, dImageResizeBoxCount,
+                  resizedWidth, resizedHeight, pnetMemory.resizedImage,
+                  resizedWidth * resizedHeight * depth, *stream);
     // Different resizing algorithm means that we differ from python at this
     // point
 
@@ -226,26 +288,99 @@ void Mtcnn::stageOne(cv::Mat image, cudaStream_t *stream) {
         pnetMemory.generateBoxesOutputBoxesCount, pnetMemory.nmsSortIndices,
         pnetMemory.nmsOutputProb, pnetMemory.outputReg, pnetMemory.outputBoxes,
         pnetMemory.outputBoxesCount, iouThreshold, *stream);
-
-    // debugPrintVals(pnetMemory.outputBoxes.get(), 20, 0, stream);
-
-    // I can probably roll this into the nms kernel
-    regressAndSquareBoxes(pnetMemory.outputBoxes, pnetMemory.outputReg,
-                          pnetMemory.outputBoxesCount, true, *stream);
-
-    debugSaveDeviceImage(dImage, imageWidth, imageHeight, depth,
-                         pnetMemory.outputBoxes, "deviceResizedImage.jpg",
-                         stream);
-
-    // Things might be different at this point. Want to verify:
-    // - Original image is the same
-    // - After normalizing is the same
-    // - After resize is the same
+    // TODO: think about what to do if we overrun the outputBoxes size
   }
+  // I can probably roll this into the nms kernel
+  regressAndSquareBoxes(pnetMemory.outputBoxes, pnetMemory.outputReg,
+                        pnetMemory.outputBoxesCount, true, *stream);
+
+  // debugSaveDeviceImage(dImage, requiredImageWidth, requiredImageHeight,
+  //                      requiredImageDepth, pnetMemory.outputBoxes,
+  //                      pnetMemory.outputBoxesCount, "deviceImagePnet.jpg",
+  //                      stream);
 
   CUDACHECK(cudaStreamSynchronize(*stream));
 }
 
+void Mtcnn::stageTwo(cudaStream_t &stream) {
+  auto &inputTensorInfos = rnet.getTrtNetInfo().inputTensorInfos;
+  auto cropWidth = inputTensorInfos.at(0).getWidth();
+  auto cropHeight = inputTensorInfos.at(0).getHeight();
+  assert(cropWidth == 24);
+  assert(cropHeight == 24);
+
+  cropResizeHWC(
+      dImage, requiredImageWidth, requiredImageHeight, requiredImageDepth,
+      pnetMemory.outputBoxes, pnetMemory.outputBoxesCount, cropWidth,
+      cropHeight, rnetMemory.croppedImages,
+      maxBoxesToGenerate * cropWidth * cropHeight * requiredImageDepth, stream);
+
+  // TODO: here I could either run the entirety of rnetMemory.croppedImages (ie
+  // maxBoxesToGenerate images) or could do a copy from
+  // pnetMemory.outputBoxesCount and use that as the batch size
+  rnet.predict({rnetMemory.croppedImages.get()},
+               {rnetMemory.prob.get(), rnetMemory.reg.get()},
+               maxBoxesToGenerate, &stream);
+
+  probMask(rnetMemory.prob, rnetMemory.reg, pnetMemory.outputBoxes,
+           pnetMemory.outputBoxesCount, rnetMemory.maskOutProb,
+           rnetMemory.maskOutReg, rnetMemory.maskOutBoxes,
+           rnetMemory.maskOutBoxesCount, maxBoxesToGenerate, threshold2,
+           stream);
+
+  float iouThreshold = 0.7;
+  nms(rnetMemory.maskOutProb, rnetMemory.maskOutReg, rnetMemory.maskOutBoxes,
+      rnetMemory.maskOutBoxesCount, rnetMemory.nmsSortIndices,
+      rnetMemory.nmsOutProb, rnetMemory.outReg, rnetMemory.outBoxes,
+      rnetMemory.outBoxesCount, iouThreshold, stream);
+
+  regressAndSquareBoxes(rnetMemory.outBoxes, rnetMemory.outReg,
+                        rnetMemory.outBoxesCount, true, stream);
+
+  // debugSaveDeviceImage(dImage, requiredImageWidth, requiredImageHeight,
+  //                      requiredImageDepth, rnetMemory.outBoxes,
+  //                      rnetMemory.outBoxesCount, "deviceImageStageTwo.jpg",
+  //                      &stream);
+}
+
+void Mtcnn::stageThree(cudaStream_t &stream) {
+  auto &inputTensorInfos = onet.getTrtNetInfo().inputTensorInfos;
+  auto cropWidth = inputTensorInfos.at(0).getWidth();
+  auto cropHeight = inputTensorInfos.at(0).getHeight();
+  assert(cropWidth == 48);
+  assert(cropHeight == 48);
+
+  cropResizeHWC(
+      dImage, requiredImageWidth, requiredImageHeight, requiredImageDepth,
+      rnetMemory.outBoxes, rnetMemory.outBoxesCount, cropWidth, cropHeight,
+      onetMemory.croppedImages,
+      maxBoxesToGenerate * cropWidth * cropHeight * requiredImageDepth, stream);
+
+  onet.predict(
+      {onetMemory.croppedImages.get()},
+      {onetMemory.prob.get(), onetMemory.reg.get(), onetMemory.landmarks.get()},
+      maxBoxesToGenerate, &stream);
+
+  probMask(onetMemory.prob, onetMemory.reg, rnetMemory.outBoxes,
+           rnetMemory.outBoxesCount, onetMemory.maskOutProb,
+           onetMemory.maskOutReg, onetMemory.maskOutBoxes,
+           onetMemory.maskOutBoxesCount, maxBoxesToGenerate, threshold2,
+           stream);
+
+  regressAndSquareBoxes(onetMemory.maskOutBoxes, onetMemory.maskOutReg,
+                        onetMemory.maskOutBoxesCount, false, stream);
+  float iouThreshold = 0.6;
+  nms(onetMemory.maskOutProb, onetMemory.maskOutReg, onetMemory.maskOutBoxes,
+      onetMemory.maskOutBoxesCount, onetMemory.nmsSortIndices,
+      onetMemory.nmsOutProb, onetMemory.outReg, onetMemory.outBoxes,
+      onetMemory.outBoxesCount, iouThreshold, stream);
+
+  debugSaveDeviceImage(dImage, requiredImageWidth, requiredImageHeight,
+                       requiredImageDepth, onetMemory.outBoxes,
+                       onetMemory.outBoxesCount, "deviceImageStageThree.jpg",
+                       &stream);
+  CUDACHECK(cudaStreamSynchronize(stream));
+}
 // Run stageOne with opencv GpuMat resizing
 //
 // void Mtcnn::stageOne(cv::Mat image) {
