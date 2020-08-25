@@ -1,6 +1,10 @@
 #include <iostream>
 #include <memory>
 
+// Non-virtual interface version
+struct NVILogger {};
+
+// Not so great, has virtual public interface
 struct Logger {
   // virtual triggers runtime dispatch based on the pointer type we call it with
   virtual void LogMessage(const char *message) = 0;
