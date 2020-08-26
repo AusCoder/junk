@@ -51,5 +51,4 @@ int main() {
   BaseVirtualDstor *bvdPtr{new DerivedVirtualDstor()};
   bvdPtr->logic();
   delete bvdPtr;
-
 }
