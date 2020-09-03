@@ -185,6 +185,10 @@ test_common
 test_trtNet
 test_mtcnnKernels
 
+cpp/ray/vec3
+cpp/ray/write-simple-ppm
+cpp/ray/simple.ppm
+
 *.o
 *.obj
 *.so
