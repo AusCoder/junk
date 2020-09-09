@@ -3,7 +3,7 @@ set -euo pipefail
 
 arr=(1 2 3)
 echo echoing all of an array "${arr[@]}"
-echo echoing an array as a string ${arr[*]}
+echo echoing an array as a string "${arr[*]}"
 echo echoing an array ${arr}, it just shows the first element
 
 echo
