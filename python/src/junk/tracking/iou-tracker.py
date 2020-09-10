@@ -1,71 +1,215 @@
 import time
 from collections import namedtuple
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable, List, Optional
 
 import cv2
 import numpy as np
+import matplotlib.cm as cm
 
 KEY_ESC = 27
 
+COLORS = (cm.jet(np.linspace(0, 1.0, 11))[:, :3] * 256).astype(int)
+
 BOX_THICKNESS = 2
-COLOR_GREEN = (0, 255, 0)
-COLOR_RED = (0, 0, 255)
+MEASUREMENT_COLOR = (0, 255, 0)
+TRACK_COLORS = COLORS
 
 IOU_THRESHOLD = 0.1
+TRACKER_MAX_AGE = 3
 
 
-PBox = namedtuple("PBox", ["x_min", "y_min", "x_max", "y_max"])
+PBox = np.ndarray
 
 
 class IoUTracker:
-    def __init__(self, initial_box: PBox) -> None:
+    count = 0
+
+    def __init__(self, initial_box: np.ndarray) -> None:
         self.box = initial_box
+        self.idx = IoUTracker.count
+        IoUTracker.count += 1
 
-    def update(self, measurement: PBox) -> None:
+        self.color = tuple(
+            int(x) % 256 for x in TRACK_COLORS[self.idx % len(TRACK_COLORS)]
+        )
+        self.predictions_since_update = 0
+
+    def predict(self):
+        # Doesn't do anything!
+        # There is no forward state propogation
+        self.predictions_since_update += 1
+
+    def update(self, measurement: np.ndarray) -> None:
         self.box = measurement
-
-
-def iou(b1: PBox, b2: PBox) -> float:
-    pass
+        self.predictions_since_update = 0
 
 
 def run_tracking():
     image_arr = np.ones((720, 1280, 3), dtype=np.uint8) * 100
 
-    all_measurements = [[PBox(x, 100, x + 100, 200)] for x in range(0, 1000, 50)]
-    tracker: Optional[IoUTracker] = None
+    # Simulated measurements
+    all_measurements = get_sliding_boxes_measurements(image_arr)
+    # all_measurements = get_constant_velocity_circle_measurements(image_arr)
+    # all_measurements = get_accelerating_circle_measurements(image_arr)
 
-    for i, measurements in enumerate(all_measurements):
+    # Current set of trackers
+    trackers = []
+
+    for measurements in all_measurements:
         current_frame = np.array(image_arr, copy=True)
         # Draw current tracker state
-        if tracker:
+        for tracker in trackers:
             current_frame = draw_bounding_boxes(
-                current_frame, [tracker.box], color=COLOR_RED
+                current_frame, [tracker.box], color=tracker.color
             )
         # Draw measurement
         current_frame = draw_bounding_boxes(
-            current_frame, measurements, color=COLOR_GREEN
+            current_frame, measurements, color=MEASUREMENT_COLOR
         )
         # Update trackers
-        (measurement,) = measurements
-        if tracker is None:
-            tracker = IoUTracker(measurement)
-        else:
-            # TODO: idea is to only update if the IOU is positive
-            if iou(measurement, tracker.box) > IOU_THRESHOLD:
-                tracker.update(measurement)
+        trackers = predict_match_create_update_and_kill(measurements, trackers)
+        # Show the result
         show_image(current_frame)
 
 
+def get_sliding_boxes_measurements(image_arr: np.ndarray) -> List[np.ndarray]:
+    all_measurements = [
+        np.array([[x, 100, x + 100, 200], [x, 500, x + 100, 550]])
+        for x in range(0, 1000, 50)
+    ]
+    start_time = 2
+    for n in range(len(all_measurements) // 2):
+        all_measurements[start_time + n] = np.concatenate(
+            (
+                all_measurements[start_time + n],
+                np.array([[50 * n + 10, 300, 50 * n + 40, 400]]),
+            ),
+            axis=0,
+        )
+    return all_measurements
+
+
+def get_constant_velocity_circle_measurements(
+    image_arr: np.ndarray,
+) -> List[np.ndarray]:
+    measurements_length = 30
+    angle = np.pi / 24
+    box_hw = 100
+    img_h, img_w, _ = image_arr.shape
+    center_x, center_y = img_w // 2, img_h // 2
+    radius = min(img_h, img_w) // 2 - box_hw
+
+    all_measurements = []
+    for i in range(measurements_length):
+        x1, y1 = (
+            center_x + radius * np.sin(i * angle),
+            center_y + radius * np.cos(i * angle),
+        )
+        x2, y2 = (
+            center_x + radius * np.sin(np.pi + i * angle),
+            center_y + radius * np.cos(np.pi + i * angle),
+        )
+        measurements = np.array(
+            [[x1, y1, x1 + box_hw, y1 + box_hw], [x2, y2, x2 + box_hw, y2 + box_hw]]
+        ).astype(int)
+        all_measurements.append(measurements)
+    return all_measurements
+
+
+def get_accelerating_circle_measurements(image_arr: np.ndarray,) -> List[np.ndarray]:
+    measurements_length = 30
+    angle = np.pi / 24
+    accel = 1.05
+    box_hw = 100
+    img_h, img_w, _ = image_arr.shape
+    center_x, center_y = img_w // 2, img_h // 2
+    radius = min(img_h, img_w) // 2 - box_hw
+
+    all_measurements = []
+    for i in range(measurements_length):
+        x1, y1 = (
+            center_x + radius * np.sin(i * angle),
+            center_y + radius * np.cos(i * angle),
+        )
+        x2, y2 = (
+            center_x + radius * np.sin(np.pi + i * angle),
+            center_y + radius * np.cos(np.pi + i * angle),
+        )
+        measurements = np.array(
+            [[x1, y1, x1 + box_hw, y1 + box_hw], [x2, y2, x2 + box_hw, y2 + box_hw]]
+        ).astype(int)
+        all_measurements.append(measurements)
+        angle *= accel
+    return all_measurements
+
+
+def predict_match_create_update_and_kill(
+    measurements: np.ndarray, trackers: List[IoUTracker]
+) -> List[IoUTracker]:
+    # Here we want to match the measurements to the trackers
+    # Logic:
+    #   Predict tracker forward
+    #   for each measurement, find the tracker that we match the best
+    #       if found, update with that measurement
+    #       otherwise create new tracker
+    #   evict old trackers
+
+    for tracker in trackers:
+        tracker.predict()
+
+    tracker_arr = np.empty((0, 4), dtype=float)
+    if trackers:
+        tracker_arr = np.stack([tracker.box for tracker in trackers])
+
+    tracker_arr_idxs = np.arange(len(tracker_arr))
+    new_trackers = []
+    for measurement in measurements:
+        iou = calculate_iou(measurement, tracker_arr[tracker_arr_idxs])
+
+        if iou.size == 0 or np.allclose(iou, np.zeros_like(iou)):
+            new_trackers.append(IoUTracker(measurement))
+        else:
+            max_iou_idx = tracker_arr_idxs[iou.argmax()]
+            trackers[max_iou_idx].update(measurement)
+            tracker_arr_idxs = tracker_arr_idxs[tracker_arr_idxs != max_iou_idx]
+
+    return [
+        tracker
+        for tracker in trackers + new_trackers
+        if tracker.predictions_since_update < TRACKER_MAX_AGE
+    ]
+
+
+def calculate_iou(b1: np.ndarray, b2: np.ndarray) -> np.ndarray:
+    if b2.size == 0:
+        return np.empty((0, 4), dtype=float)
+    if b2.ndim == 1:
+        b2 = b2.reshape((1, -1))
+    assert b1.shape == (4,)
+    assert b2.ndim == 2
+
+    x_min = np.maximum(b1[0], b2[:, 0])
+    y_min = np.maximum(b1[1], b2[:, 1])
+    x_max = np.minimum(b1[2], b2[:, 2])
+    y_max = np.minimum(b1[3], b2[:, 3])
+
+    intersection = np.maximum(0, x_max - x_min) * np.maximum(0, y_max - y_min)
+    area_b1 = (b1[2] - b1[0]) * (b1[3] - b1[1])
+    area_b2 = (b2[:, 2] - b2[:, 0]) * (b2[:, 3] - b2[:, 1])
+    union = np.maximum(1e-5, ((area_b1 + area_b2) - intersection))
+    return intersection / union
+
+
 def draw_bounding_boxes(
-    image_arr: np.ndarray, bounding_boxes: Iterable[PBox], *, color: Any = COLOR_GREEN
+    image_arr: np.ndarray, bounding_boxes: Iterable[PBox], *, color: Any
 ) -> np.ndarray:
     new_image_arr = np.array(image_arr, copy=True)
     for box in bounding_boxes:
+        x_min, y_min, x_max, y_max = box
         cv2.rectangle(
             new_image_arr,
-            (box.x_min, box.y_min),
-            (box.x_max, box.y_max),
+            (x_min, y_min),
+            (x_max, y_max),
             color=color,
             thickness=BOX_THICKNESS,
         )
@@ -76,7 +220,7 @@ def draw_and_show_bounding_boxes(
     image_arr: np.ndarray,
     bounding_boxes: Iterable[PBox],
     *,
-    color: Any = COLOR_GREEN,
+    color: Any,
     should_wait: bool = False,
     sleep_time_ms: int = 500,
 ) -> None:
@@ -99,7 +243,5 @@ def show_image(
 
 
 if __name__ == "__main__":
-    # image_arr = np.ones((720, 1280, 3), dtype=np.uint8) * 100
-    # draw_and_show_bounding_boxes(image_arr, [PBox(50, 50, 300, 300)])
     run_tracking()
     cv2.destroyAllWindows()
