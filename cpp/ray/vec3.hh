@@ -10,9 +10,11 @@ public:
   vec3() : elements{0, 0, 0} {}
   vec3(double e1, double e2, double e3) : elements{e1, e2, e3} {}
 
+  vec3(const vec3 &x) = default;
+
   double x() const { return elements[0]; }
-  double y() const { return elements[0]; }
-  double z() const { return elements[0]; }
+  double y() const { return elements[1]; }
+  double z() const { return elements[2]; }
 
   vec3 operator-() { return {-elements[0], -elements[1], -elements[2]}; }
   double operator[](int i) const { return elements.at(i); }
@@ -43,6 +45,11 @@ private:
   std::array<double, 3> elements;
 };
 
+// Aliases
+using point3 = vec3;
+using color = vec3;
+
+// Utility functions
 inline std::ostream &operator<<(std::ostream &s, const vec3 &x) {
   return s << x[0] << ' ' << x[1] << ' ' << x[2];
 }
@@ -53,6 +60,38 @@ inline vec3 operator+(const vec3 &x, const vec3 &y) {
 
 inline vec3 operator-(const vec3 &x, const vec3 &y) {
   return {x[0] - y[0], x[1] - y[1], x[2] - y[2]};
+}
+
+inline vec3 operator*(const vec3 &x, const vec3 &y) {
+  return {x[0] * y[0], x[1] * y[1], x[2] * y[2]};
+}
+
+inline vec3 operator*(const vec3 &x, double t) {
+  return {t * x[0], t * x[1], t * x[2]};
+}
+
+inline vec3 operator*(double t, const vec3 &x) {
+  return x * t;
+}
+
+inline vec3 operator/(const vec3 &x, double t) {
+  return x * (1 / t);
+}
+
+inline double dot(const vec3 &x, const vec3 &y) {
+  return x[0] * y[0] + x[1] * y[1] + x[2] * y[2];
+}
+
+inline vec3 cross(const vec3 &x, const vec3 &y) {
+  return {
+    x[1] * y[2] - x[2] * y[1],
+    x[2] * y[0] - x[0] * y[2],
+    x[0] * y[1] - x[1] * y[0]
+  };
+}
+
+inline vec3 unit_vector(const vec3 &x) {
+  return x / x.length();
 }
 
 #endif
