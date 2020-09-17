@@ -5,11 +5,11 @@ CPPFLAGS=
 vec3: vec3.cc
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $<
 
-ray-racer: ray-racer.cc
+ray-tracer: ray-tracer.cc
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $<
 
 write-simple-ppm: write-simple-ppm.cc
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $<
 
 clean:
-	$(RM) write-simple-ppm
+	$(RM) write-simple-ppm ray-tracer

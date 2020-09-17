@@ -3,9 +3,27 @@
 #include "vec3.hh"
 #include <iostream>
 
+double hit_sphere(const point3 &center, double radius, const ray &r) {
+  vec3 oc = r.origin() - center;
+  auto a = r.direction().length_squared();
+  auto half_b = dot(oc, r.direction());
+  auto c = oc.length_squared() - radius * radius;
+  auto discriminant = half_b * half_b - a * c;
+  if (discriminant < 0) {
+    return -1.0;
+  } else {
+    return (-half_b - std::sqrt(discriminant)) / a;
+  }
+}
+
 color ray_color(const ray &r) {
+  auto t = hit_sphere({0, 0, -1}, 0.5, r);
+  if (t > 0.0) {
+    vec3 N = unit_vector(r.at(t) - vec3(0, 0, -1));
+    return 0.5 * color(N.x() + 1, N.y() + 1, N.z() + 1);
+  }
   vec3 unit_direction = unit_vector(r.direction());
-  auto t = 0.5 * (unit_direction.y() + 1.0);
+  t = 0.5 * (unit_direction.y() + 1.0);
   return (1.0 - t) * color(1.0, 1.0, 1.0) + t * color(0.5, 0.7, 1.0);
 }
 
@@ -20,13 +38,21 @@ int main() {
   auto viewport_width = aspect_ratio * viewport_height;
   auto focal_length = 1.0;
 
+  point3 origin{0, 0, 0};
+  vec3 horizontal{viewport_width, 0, 0};
+  vec3 vertical{0, viewport_height, 0};
+  auto lower_left_corner =
+      origin - horizontal / 2 - vertical / 2 - vec3(0, 0, focal_length);
+
   std::cout << "P3\n" << image_width << ' ' << image_height << ' ' << "\n255\n";
 
   for (int j = image_height - 1; j >= 0; j--) {
     std::cerr << "\rScan lines remaining: " << j << std::flush;
     for (int i = 0; i < image_width; i++) {
-      color pixel_color{static_cast<double>(i) / (image_width - 1),
-                        static_cast<double>(j) / (image_height - 1), 0.25};
+      auto u = static_cast<double>(i) / (image_width - 1);
+      auto v = static_cast<double>(j) / (image_height - 1);
+      ray r{origin, lower_left_corner + u * horizontal + v * vertical - origin};
+      color pixel_color = ray_color(r);
       write_color(std::cout, pixel_color);
     }
   }
