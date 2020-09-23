@@ -200,3 +200,4 @@ __pycache__
 venv
 
 rust/*/target
+cpp/ray/ray-tracer
