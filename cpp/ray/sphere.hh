@@ -26,27 +26,27 @@ bool sphere::hit(const ray &r, double t_min, double t_max,
   auto c = oc.length_squared() - radius * radius;
   auto descriminant = half_b * half_b - a * c;
 
-  bool found_hit = false;
+  bool is_hit = false;
   double t = 0;
   if (descriminant >= 0) {
     auto sqrt_descriminant = std::sqrt(descriminant);
     auto t1 = (-half_b - sqrt_descriminant) / a;
     auto t2 = (-half_b + sqrt_descriminant) / a;
     if ((t1 > t_min) && (t1 <= t_max)) {
-      found_hit = true;
+      is_hit = true;
       t = t1;
     } else if ((t2 >= t_min) && (t2 <= t_max)) {
-      found_hit = true;
+      is_hit = true;
       t = t2;
     }
   }
-  if (found_hit) {
+  if (is_hit) {
     record.point = r.at(t);
     auto outward_normal = (record.point - center) / radius;
     record.set_front_face(r, outward_normal);
     record.t = t;
   }
-  return found_hit;
+  return is_hit;
 }
 
 #endif

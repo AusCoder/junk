@@ -1,6 +1,7 @@
 #ifndef _VEC_3_HH
 #define _VEC_3_HH
 
+#include "rtweekend.hh"
 #include <array>
 #include <cmath>
 #include <ostream>
@@ -39,6 +40,15 @@ public:
   double length_squared() const {
     return elements[0] * elements[0] + elements[1] * elements[1] +
            elements[2] * elements[2];
+  }
+
+  inline static vec3 random() {
+    return {random_double(), random_double(), random_double()};
+  }
+
+  inline static vec3 random(double min, double max) {
+    return {random_double(min, max), random_double(min, max),
+            random_double(min, max)};
   }
 
 private:
@@ -84,5 +94,14 @@ inline vec3 cross(const vec3 &x, const vec3 &y) {
 }
 
 inline vec3 unit_vector(const vec3 &x) { return x / x.length(); }
+
+vec3 random_in_unit_sphere() {
+  while (true) {
+    vec3 vec{vec3::random(-1, 1)};
+    if (vec.length_squared() < 1) {
+      return vec;
+    }
+  }
+}
 
 #endif

@@ -12,4 +12,4 @@ write-simple-ppm: write-simple-ppm.cc
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $<
 
 clean:
-	$(RM) write-simple-ppm ray-tracer
+	$(RM) write-simple-ppm ray-tracer simple.ppm

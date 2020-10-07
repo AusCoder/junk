@@ -7,9 +7,6 @@
 #include <memory>
 #include <random>
 
-#include "ray.hh"
-#include "vec3.hh"
-
 using std::make_shared;
 using std::shared_ptr;
 using std::sqrt;
@@ -29,6 +26,16 @@ inline double random_double() {
 
 inline double random_double(double min, double max) {
   return min + (max - min) * random_double();
+}
+
+inline double clamp(double x, double min, double max) {
+  if (x < min) {
+    return min;
+  }
+  if (x > max) {
+    return max;
+  }
+  return x;
 }
 
 #endif
