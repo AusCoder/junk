@@ -14,8 +14,11 @@ resizeImage: resizeImage.o
 showPixels: showPixels.o
 	$(CXX) $^ -o $@ $(LDFLAGS) $(LDLIBS)
 
+hsvThreshold: hsvThreshold.o
+	$(CXX) $^ -o $@ $(LDFLAGS) $(LDLIBS)
+
 %.o: %.cpp
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
 
 clean:
-	$(RM) *.o *.obj imShow resizeImage showPixels
+	$(RM) *.o *.obj imShow resizeImage showPixels hsvThreshold
