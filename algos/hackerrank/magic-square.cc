@@ -1,4 +1,4 @@
-#include "bits-and-bobs.hh"
+#include "../../common/include/bits-and-bobs.hh"
 
 bool isSolved(const std::vector<std::vector<int>> &matrix) {
   const int expectedSum = 15;
