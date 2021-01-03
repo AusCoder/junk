@@ -1,3 +1,8 @@
+/*
+  This is a face tracker that makes use of the opencv
+  haar cascade face detector and the CSRT object tracker.
+*/
+
 #include <algorithm>
 #include <chrono>
 #include <iostream>
