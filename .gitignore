@@ -2,7 +2,6 @@
 *~a.out
 *.o
 *.obj
-main
 data-structs-algos/list-main
 
 # Byte-compiled / optimized / DLL files
@@ -152,7 +151,6 @@ static
 
 *~
 
-main
 nmsCpu
 nmsGpu
 generateBoxes
