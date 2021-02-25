@@ -26,8 +26,7 @@ public class Stack<A> implements Iterable<A> {
 
   public A pop() {
     if (idx <= 0) {
-      // What is the right exception for here?
-      throw new IllegalArgumentException();
+      throw new NoSuchElementException();
     }
     A out = arr[--idx];
     arr[idx] = null;
@@ -40,8 +39,7 @@ public class Stack<A> implements Iterable<A> {
 
   public A peek() {
     if (idx <= 0) {
-      // What is the right exception for here?
-      throw new IllegalArgumentException();
+      throw new NoSuchElementException();
     }
     return arr[idx - 1];
   }
