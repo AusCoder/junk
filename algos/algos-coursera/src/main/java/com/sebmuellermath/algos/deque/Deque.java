@@ -13,7 +13,7 @@ public class Deque<A> implements Iterable<A> {
         tail = null;
     }
 
-    public int isEmpty() {
+    public boolean isEmpty() {
         return head == null;
     }
 
