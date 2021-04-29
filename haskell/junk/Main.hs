@@ -1,20 +1,26 @@
 module Main where
 
-import Control.Applicative
-import Data.Char (digitToInt)
-import Data.Functor.Identity (Identity)
-import qualified Text.Parsec as TP
-import qualified Text.Parsec.Char as TPC
-
-type Parser s a = TP.ParsecT s () Identity a
-
-number :: Parser String Int
-number = fmap (numberFromDigits . fmap digitToInt) (TP.many TPC.digit)
-
-numberFromDigits :: [Int] -> Int
-numberFromDigits = foldl (\acc n -> acc * 10 + n) 0
+import Boxes
+import qualified Graphics.Image as GI
+import qualified Graphics.Image.Interface as GII
+import System.IO
 
 main :: IO ()
 main = do
-  let inputStr = "123"
-  print $ numberFromDigits [4, 5, 6, 2]
+  ls <- readFile "/proc/modules"
+  let moduleNames = map (head . words) $ lines ls
+  mapM_ putStrLn moduleNames
+  print sample
+
+splitOn :: Eq a => a -> [a] -> [[a]]
+splitOn c s = case dropWhile (== c) s of
+  [] -> []
+  s' ->
+    let (w, s'') = break (== c) s'
+     in w : splitOn c s''
+
+-- main :: IO ()
+-- main = do
+--   image1 <- GI.readImageRGB GI.VU "/home/seb/Pictures/cricket.jpg"
+--   image2 <- GI.readImageRGB GI.VU "/home/seb/Pictures/cricket.jpg"
+--   print $ GII.foldr ((+) . abs) 0 $ image1 - image2
