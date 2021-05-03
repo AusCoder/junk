@@ -22,6 +22,7 @@ import UI.NCurses
     moveCursor,
     render,
     runCurses,
+    screenSize,
     setCursorMode,
     setEcho,
     updateWindow,
@@ -34,9 +35,11 @@ data FlapPosition = FlapUp | FlapDown deriving (Show)
 data GameState = GameState
   { xPosition :: Integer,
     yPosition :: Integer,
-    flapPosition :: FlapPosition,
     playingState :: PlayingState,
-    ticks :: Integer
+    ticks :: Integer,
+    screenHeight :: Integer,
+    screenWidth :: Integer,
+    spriteHeight :: Integer
   }
   deriving (Show)
 
@@ -44,25 +47,28 @@ data GameEvent = Tick | UserEvent Event deriving (Show)
 
 newtype GameEnv = GameEnv {gameStateRef :: IORef GameState}
 
-initialGameState :: GameState
-initialGameState =
+initialGameState :: Integer -> Integer -> GameState
+initialGameState h w =
   GameState
     { xPosition = 3,
       yPosition = 3,
       playingState = Running,
-      flapPosition = FlapDown,
-      ticks = 0
+      ticks = 0,
+      screenHeight = h,
+      screenWidth = w,
+      spriteHeight = 2
     }
 
 main :: IO ()
 main = runCurses $ do
   setEcho False
   setCursorMode CursorInvisible
-  w <- defaultWindow
+  window <- defaultWindow
+  (height, width) <- screenSize
   gameEnv <-
-    liftIO . fmap GameEnv . newIORef $ initialGameState
+    liftIO . fmap GameEnv . newIORef $ initialGameState height width
 
-  mainLoop w gameEnv
+  mainLoop window gameEnv
 
 mainLoop :: Window -> GameEnv -> Curses ()
 mainLoop w gameEnv = do
@@ -95,16 +101,18 @@ updateGameState events = do
   liftIO . modifyIORef r $ flip (foldr applyEvent) events
 
 applyEvent :: GameEvent -> GameState -> GameState
-applyEvent Tick g@GameState {xPosition = x, yPosition = y, flapPosition = fPos, ticks = t} =
-  let newFPos = case fPos of
-        FlapUp -> FlapDown
-        FlapDown -> FlapUp
-   in g {xPosition = x + 1, yPosition = y + 1, flapPosition = newFPos, ticks = t + 1}
+applyEvent Tick g@GameState {xPosition = x, yPosition = y, ticks = t} =
+  clipToScreen $ g {xPosition = x + 1, yPosition = y + 1, ticks = t + 1}
 applyEvent (UserEvent ev) g@GameState {yPosition = y} =
   case ev of
     EventCharacter 'q' -> g {playingState = Exited}
-    EventCharacter ' ' -> g {yPosition = y - 3}
+    EventCharacter ' ' -> clipToScreen $ g {yPosition = y - 3}
+    EventCharacter 'w' -> clipToScreen $ g {yPosition = y - 3}
     _ -> g
+
+clipToScreen :: GameState -> GameState
+clipToScreen g@GameState {yPosition = y, screenHeight = h, spriteHeight = sh} =
+  g {yPosition = min (max (-1) y) (h - sh)}
 
 gatherEventsOverMillis :: Window -> Integer -> Curses [GameEvent]
 gatherEventsOverMillis w dur =
@@ -119,17 +127,24 @@ gatherEventsOverMillis w dur =
           else loop (dur' - diffMillis) acc'
    in loop dur [Tick]
 
+flapPosition :: GameState -> FlapPosition
+flapPosition GameState {ticks = t} =
+  case t `mod` 4 `div` 2 of
+    0 -> FlapUp
+    1 -> FlapDown
+
 drawBird :: GameState -> Update ()
-drawBird g@GameState {xPosition = x, yPosition = y, flapPosition = fPos} =
-  moveCursor y x >> case fPos of
-    FlapUp -> do
-      drawString "\\   /"
-      moveCursor (y + 1) x
-      drawString " \\o/ "
-    FlapDown -> do
-      drawString " /o\\ "
-      moveCursor (y + 1) x
-      drawString "/   \\"
+drawBird g@GameState {xPosition = x, yPosition = y} =
+  let fPos = flapPosition g
+   in moveCursor y x >> case fPos of
+        FlapUp -> do
+          drawString "\\   /"
+          moveCursor (y + 1) x
+          drawString " \\o/ "
+        FlapDown -> do
+          drawString " /o\\ "
+          moveCursor (y + 1) x
+          drawString "/   \\"
 
 timeDiffMillis :: UTCTime -> UTCTime -> Integer
 timeDiffMillis a b =
