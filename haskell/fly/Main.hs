@@ -10,10 +10,12 @@ import Data.Ratio (denominator, numerator)
 import Data.Time.Clock (UTCTime, diffUTCTime, getCurrentTime, nominalDiffTimeToSeconds)
 import UI.NCurses
   ( Curses,
+    CursesException,
     CursorMode (CursorInvisible),
     Event (EventCharacter),
     Update,
     Window,
+    catchCurses,
     clear,
     cursorPosition,
     defaultWindow,
@@ -32,6 +34,9 @@ data PlayingState = Running | GameOver | Exited deriving (Show)
 
 data FlapPosition = FlapUp | FlapDown deriving (Show)
 
+instance Show Window where
+  show _ = "Window (there is probably more to it than that!)"
+
 data GameState = GameState
   { xPosition :: Integer,
     yPosition :: Integer,
@@ -39,93 +44,114 @@ data GameState = GameState
     ticks :: Integer,
     screenHeight :: Integer,
     screenWidth :: Integer,
-    spriteHeight :: Integer
+    spriteHeight :: Integer,
+    tickDuration :: Integer
   }
   deriving (Show)
 
 data GameEvent = Tick | UserEvent Event deriving (Show)
 
-newtype GameEnv = GameEnv {gameStateRef :: IORef GameState}
+data GameEnv = GameEnv {getGameStateRef :: IORef GameState, getWindow :: Window}
 
-initialGameState :: Integer -> Integer -> GameState
-initialGameState h w =
-  GameState
-    { xPosition = 3,
-      yPosition = 3,
-      playingState = Running,
-      ticks = 0,
-      screenHeight = h,
-      screenWidth = w,
-      spriteHeight = 2
-    }
+initialGameEnv :: Curses GameEnv
+initialGameEnv = do
+  window <- defaultWindow
+  (height, width) <- screenSize
+  gsRef <-
+    liftIO . newIORef $
+      GameState
+        { xPosition = 3,
+          yPosition = 3,
+          playingState = Running,
+          ticks = 0,
+          screenHeight = height,
+          screenWidth = width,
+          spriteHeight = 2,
+          tickDuration = 100
+        }
+  return
+    GameEnv
+      { getGameStateRef = gsRef,
+        getWindow = window
+      }
 
 main :: IO ()
 main = runCurses $ do
   setEcho False
   setCursorMode CursorInvisible
-  window <- defaultWindow
-  (height, width) <- screenSize
-  gameEnv <-
-    liftIO . fmap GameEnv . newIORef $ initialGameState height width
+  gameEnv <- initialGameEnv
+  runReaderT mainLoop gameEnv
 
-  mainLoop window gameEnv
-
-mainLoop :: Window -> GameEnv -> Curses ()
-mainLoop w gameEnv = do
+mainLoop :: ReaderT GameEnv Curses ()
+mainLoop = do
   -- Main loop logic:
   -- draw
   -- wait + gather events
   -- update game state
 
-  gameState <- liftIO . readIORef . gameStateRef $ gameEnv
-  updateWindow w $ do
+  window <- asks getWindow
+  gameState <- ask >>= liftIO . readIORef . getGameStateRef
+  lift . updateWindow window $ do
     clear
     moveCursor 0 0
-    drawString . show . ticks $ gameState
+    drawString $ "Ticks: " ++ show (ticks gameState)
     drawBird gameState
     moveCursor 0 0
-  render
+  lift render
 
-  events <- gatherEventsOverMillis w 100
-  liftIO $ runReaderT (updateGameState events) gameEnv
-  gameState' <- liftIO . readIORef . gameStateRef $ gameEnv
+  events <- gatherEvents
+  mapReaderT liftIO $ updateGameState events
+  playingState' <- ask >>= fmap playingState . liftIO . readIORef . getGameStateRef
 
-  case playingState gameState' of
-    Running -> mainLoop w gameEnv
+  case playingState' of
+    Running -> mainLoop
     GameOver -> return ()
     Exited -> return ()
 
 updateGameState :: [GameEvent] -> ReaderT GameEnv IO ()
 updateGameState events = do
-  r <- asks gameStateRef
-  liftIO . modifyIORef r $ flip (foldr applyEvent) events
+  r <- asks getGameStateRef
+  liftIO . modifyIORef r . fmap clipToScreen $
+    flip (foldr applyEvent) events
 
 applyEvent :: GameEvent -> GameState -> GameState
 applyEvent Tick g@GameState {xPosition = x, yPosition = y, ticks = t} =
-  clipToScreen $ g {xPosition = x + 1, yPosition = y + 1, ticks = t + 1}
+  g {xPosition = x + 1, yPosition = y + 1, ticks = t + 1}
 applyEvent (UserEvent ev) g@GameState {yPosition = y} =
   case ev of
     EventCharacter 'q' -> g {playingState = Exited}
-    EventCharacter ' ' -> clipToScreen $ g {yPosition = y - 3}
-    EventCharacter 'w' -> clipToScreen $ g {yPosition = y - 3}
+    EventCharacter ' ' -> g {yPosition = y - 3}
+    EventCharacter 'w' -> g {yPosition = y - 3}
     _ -> g
 
 clipToScreen :: GameState -> GameState
-clipToScreen g@GameState {yPosition = y, screenHeight = h, spriteHeight = sh} =
-  g {yPosition = min (max (-1) y) (h - sh)}
+clipToScreen
+  g@GameState
+    { xPosition = x,
+      yPosition = y,
+      screenWidth = w,
+      screenHeight = h,
+      spriteHeight = sh
+    } =
+    g
+      { yPosition = min (max 0 y) (h - sh),
+        xPosition = if x < w - 5 then x else 0
+      }
 
-gatherEventsOverMillis :: Window -> Integer -> Curses [GameEvent]
-gatherEventsOverMillis w dur =
-  let loop dur' acc = do
+gatherEvents :: ReaderT GameEnv Curses [GameEvent]
+gatherEvents =
+  let loop :: [GameEvent] -> Integer -> ReaderT GameEnv Curses [GameEvent]
+      loop acc dur = do
+        window <- asks getWindow
         startTime <- liftIO getCurrentTime
-        event <- getEvent w $ Just dur'
+        event <- lift . getEvent window $ Just dur
         endTime <- liftIO getCurrentTime
         let diffMillis = timeDiffMillis endTime startTime
-        let acc' = acc ++ maybeToList (UserEvent <$> event)
-        if diffMillis >= dur'
+        let acc' = maybe acc ((: acc) . UserEvent) event
+        if diffMillis >= dur
           then return acc'
-          else loop (dur' - diffMillis) acc'
-   in loop dur [Tick]
+          else loop acc' (dur - diffMillis)
+   in ask >>= fmap tickDuration . liftIO . readIORef . getGameStateRef >>= loop [Tick]
 
 flapPosition :: GameState -> FlapPosition
 flapPosition GameState {ticks = t} =
@@ -151,11 +177,22 @@ timeDiffMillis a b =
   let r = toRational . (* 1000) . nominalDiffTimeToSeconds $ diffUTCTime a b
    in numerator r `div` denominator r
 
--- waitFor :: Window -> (Event -> Bool) -> Curses ()
--- waitFor w p = loop
---   where
---     loop = do
---       ev <- getEvent w Nothing
---       case ev of
---         Nothing -> loop
---         Just ev' -> if p ev' then return () else loop
+debug :: CursesException -> ReaderT GameEnv Curses ()
+debug exc =
+  let waitForQ :: ReaderT GameEnv Curses ()
+      waitForQ = do
+        window <- asks getWindow
+        ev <- lift $ getEvent window Nothing
+        case ev of
+          Just (EventCharacter 'q') -> return ()
+          _ -> waitForQ
+   in do
+        window <- asks getWindow
+        gameState <- ask >>= liftIO . readIORef . getGameStateRef
+        lift . updateWindow window $ do
+          moveCursor 20 20
+          drawString $ show exc
+          moveCursor 21 20
+          drawString $ show gameState
+        lift render
+        waitForQ
