@@ -159,6 +159,9 @@ flapPosition GameState {ticks = t} =
     0 -> FlapUp
     1 -> FlapDown
 
+drawGame :: GameState -> Update ()
+drawGame gameState = undefined
+
 drawBird :: GameState -> Update ()
 drawBird g@GameState {xPosition = x, yPosition = y} =
   let fPos = flapPosition g

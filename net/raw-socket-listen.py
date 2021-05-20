@@ -6,8 +6,9 @@ import net
 
 
 def main():
-    iface = "enp6s0"
-    # iface = "wlp3s0"
+    #iface = "lo"
+    #iface = "enp6s0"
+    iface = "wlp3s0"
     with socket.socket(
         socket.AF_PACKET, socket.SOCK_RAW, socket.htons(net.ETH_P_IP)
     ) as server_socket:
@@ -23,7 +24,8 @@ def main():
                     payload = frame[net.ETH_HLEN :]
                     dst = net.bytes_to_eui48(dst)
                     src = net.bytes_to_eui48(src)
-                    if src == "d4:3b:04:21:b2:ef":
+                    #if src == "d4:3b:04:21:b2:ef":
+                    if dst == "ff:ff:ff:ff:ff:ff":
                         print(
                             f"dst: {dst}, "
                             f"src: {src}, "
