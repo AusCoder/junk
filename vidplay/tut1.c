@@ -88,6 +88,7 @@ int main(int argc, char *argv[]) {
     PRINT_STDERR("av_image_fill_arrays failed\n");
     return -1;
   }
+  printf("RGB linesize %d\n", pFrameRGB->linesize[0]);
 
   // Read frames
   struct SwsContext *swsCtx = sws_getContext(
@@ -103,10 +104,7 @@ int main(int argc, char *argv[]) {
   while (av_read_frame(pFormatCtx, &avPacket) >= 0) {
     // Check packet from video stream
     if (avPacket.stream_index == videoStreamIdx) {
-      // Decode video frame
-      // avcodec_decode_video2(
-      //    pCodecCtx, pFrame, &frameFinished, &packet
-      // );
+      // Try to send packet for decoding
       int sendRet = avcodec_send_packet(pCodecCtx, &avPacket);
       if (sendRet == AVERROR(EAGAIN)) {
         // need to try reading
@@ -116,25 +114,29 @@ int main(int argc, char *argv[]) {
         PRINT_STDERR("avcodec_send_packet failed\n");
         return -1;
       }
+      // Try to read a frame from decoder
       int recvRet = avcodec_receive_frame(pCodecCtx, pFrame);
       if (recvRet == AVERROR(EAGAIN)) {
         printf("Can't receive frame, will try to send\n");
-        continue;
       } else if (recvRet < 0) {
         PRINT_STDERR("avcodec_receive_frame failed\n");
         return -1;
+      } else {
+        // Got a frame
+        // Print some info about linesizes
+        // printf("Encoded (probably YUV) frame linesize: %d\n",
+        //        pFrame->linesize[0]);
+        sws_scale(swsCtx, (uint8_t const *const *)pFrame->data,
+                  pFrame->linesize, 0, pCodecCtx->height, pFrameRGB->data,
+                  pFrameRGB->linesize);
+        if (frameIdx < 5) {
+          save_frame(pFrameRGB, pCodecCtx->width, pCodecCtx->height, frameIdx);
+        }
+        frameIdx++;
+        av_frame_unref(pFrame);
       }
-      // We got a frame!
-
-      // Surely this will fail because we have not called av_image_fill_arrays
-      // pFrame contains a null pointer data array
-      sws_scale(swsCtx, (uint8_t const *const *)pFrame->data, pFrame->linesize,
-                0, pCodecCtx->height, pFrameRGB->data, pFrameRGB->linesize);
-      if (frameIdx < 5) {
-        save_frame(pFrameRGB, pCodecCtx->width, pCodecCtx->height, frameIdx);
-      }
-      frameIdx++;
     }
+    av_packet_unref(&avPacket);
   }
   sws_freeContext(swsCtx);
   avcodec_close(pCodecCtx);
