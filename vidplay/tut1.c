@@ -25,7 +25,7 @@ void save_frame(AVFrame *pFrame, int width, int height, int frameIdx) {
 }
 
 int main(int argc, char *argv[]) {
-  // av_register_all();
+
   const char *find_path = argv[1];
   AVFormatContext *pFormatCtx = NULL;
   if (avformat_open_input(&pFormatCtx, find_path, NULL, NULL) != 0) {
@@ -141,9 +141,8 @@ int main(int argc, char *argv[]) {
   sws_freeContext(swsCtx);
   avcodec_close(pCodecCtx);
   av_frame_free(&pFrame);
-  // free buffer in here too?
+  av_free(pFrameRGB->data[0]);
   av_frame_free(&pFrameRGB);
-  av_free(buffer);
   avcodec_free_context(&pCodecCtx);
   avformat_close_input(&pFormatCtx);
 
