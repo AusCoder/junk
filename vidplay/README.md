@@ -3,7 +3,11 @@
 Tutorial from [here](http://dranger.com/ffmpeg/).
 
 ## Questions
-SDL texture vs surface, what's the difference?
+* SDL texture vs surface, what's the difference?
+* Is AVFrame data always continuous? Even across image rows and planes?
+    Do I need to copy to a continuous buffer before calling SDL_UpdateTexture?
+* What does SDL_TEXTUREACCESS_ do?
+* Should I call `avcodec_send_packet` and `avcodec_receive_frame` in subloops?
 
 ## Dev
 ```shell

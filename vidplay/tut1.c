@@ -133,7 +133,8 @@ int main(int argc, char *argv[]) {
           save_frame(pFrameRGB, pCodecCtx->width, pCodecCtx->height, frameIdx);
         }
         frameIdx++;
-        av_frame_unref(pFrame);
+        // unrefing frames is not required
+        // av_frame_unref(pFrame);
       }
     }
     av_packet_unref(&avPacket);

@@ -1,3 +1,11 @@
+/* Decodes and displays a video in an SDL window.
+
+Questions:
+  - Is AVFrame->data always continuous? Or do I
+    need to copy to a continuous buffer for SDL texture?
+*/
+#include <assert.h>
+
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libavutil/imgutils.h>
@@ -20,11 +28,13 @@ typedef struct {
   AVCodec *codec;
   AVCodecContext *codecCtx;
   AVFrame *frameDecoded;
-  AVFrame *frameRGB;
+  AVFrame *frameYUV;
   struct SwsContext *swsCtx;
+  int videoStreamIdx;
+  uint8_t *bufYUV;
 } VPVidContext;
 
-int create_vidplay_context(VPVidContext *ctx, const char *path) {
+int create_vidplay_context(VPVidContext *vidCtx, const char *path) {
   AVFormatContext *pFormatCtx = NULL;
   if (avformat_open_input(&pFormatCtx, path, NULL, NULL) != 0) {
     return -1;
@@ -74,8 +84,8 @@ int create_vidplay_context(VPVidContext *ctx, const char *path) {
     avformat_close_input(&pFormatCtx);
     return -1;
   }
-  AVFrame *pFrameRGB = av_frame_alloc();
-  if (pFrameRGB == NULL) {
+  AVFrame *pFrameYUV = av_frame_alloc();
+  if (pFrameYUV == NULL) {
     LOG_ERROR("Failed to alloc frame");
     av_frame_free(&pFrameDecoded);
     avcodec_close(pCodecCtx);
@@ -84,25 +94,25 @@ int create_vidplay_context(VPVidContext *ctx, const char *path) {
     return -1;
   }
 
-  int numBytes = av_image_get_buffer_size(AV_PIX_FMT_RGB24, pCodecPar->width,
-                                          pCodecPar->height, 1);
+  int numBytes = av_image_get_buffer_size(AV_PIX_FMT_YUV420P, SCREEN_WIDTH,
+                                          SCREEN_HEIGHT, 1);
   uint8_t *buffer = (uint8_t *)av_malloc(numBytes * sizeof(uint8_t));
   if (buffer == NULL) {
     LOG_ERROR("Failed to alloc buffer");
     av_frame_free(&pFrameDecoded);
-    av_frame_free(&pFrameRGB);
+    av_frame_free(&pFrameYUV);
     avcodec_close(pCodecCtx);
     avcodec_free_context(&pCodecCtx);
     avformat_close_input(&pFormatCtx);
     return -1;
   }
-  if (av_image_fill_arrays(pFrameRGB->data, pFrameRGB->linesize, buffer,
-                           AV_PIX_FMT_RGB24, pCodecPar->width,
-                           pCodecPar->height, 1) < 0) {
+  if (av_image_fill_arrays(pFrameYUV->data, pFrameYUV->linesize, buffer,
+                           AV_PIX_FMT_YUV420P, SCREEN_WIDTH, SCREEN_HEIGHT,
+                           1) < 0) {
     LOG_ERROR("av_image_fill_arrays failed");
     av_free(buffer);
     av_frame_free(&pFrameDecoded);
-    av_frame_free(&pFrameRGB);
+    av_frame_free(&pFrameYUV);
     avcodec_close(pCodecCtx);
     avcodec_free_context(&pCodecCtx);
     avformat_close_input(&pFormatCtx);
@@ -110,25 +120,27 @@ int create_vidplay_context(VPVidContext *ctx, const char *path) {
   }
 
   struct SwsContext *pSwsCtx = sws_getContext(
-      pCodecCtx->width, pCodecCtx->height, pCodecCtx->pix_fmt, pCodecCtx->width,
-      pCodecCtx->height, AV_PIX_FMT_RGB24, SWS_BILINEAR, NULL, NULL, NULL);
+      pCodecCtx->width, pCodecCtx->height, pCodecCtx->pix_fmt, SCREEN_WIDTH,
+      SCREEN_HEIGHT, AV_PIX_FMT_YUV420P, SWS_BILINEAR, NULL, NULL, NULL);
   if (pSwsCtx == NULL) {
     LOG_ERROR("sws_getContext failed");
     av_free(buffer);
     av_frame_free(&pFrameDecoded);
-    av_frame_free(&pFrameRGB);
+    av_frame_free(&pFrameYUV);
     avcodec_close(pCodecCtx);
     avcodec_free_context(&pCodecCtx);
     avformat_close_input(&pFormatCtx);
     return -1;
   }
-  ctx->formatCtx = pFormatCtx;
-  ctx->codecPar = pCodecPar;
-  ctx->codec = pCodec;
-  ctx->codecCtx = pCodecCtx;
-  ctx->frameDecoded = pFrameDecoded;
-  ctx->frameRGB = pFrameRGB;
-  ctx->swsCtx = pSwsCtx;
+  vidCtx->formatCtx = pFormatCtx;
+  vidCtx->codecPar = pCodecPar;
+  vidCtx->codec = pCodec;
+  vidCtx->codecCtx = pCodecCtx;
+  vidCtx->frameDecoded = pFrameDecoded;
+  vidCtx->frameYUV = pFrameYUV;
+  vidCtx->swsCtx = pSwsCtx;
+  vidCtx->videoStreamIdx = videoStreamIdx;
+  vidCtx->bufYUV = NULL;
   return 0;
 }
 
@@ -136,10 +148,71 @@ void close_vidplay_context(VPVidContext *ctx) {
   sws_freeContext(ctx->swsCtx);
   avcodec_close(ctx->codecCtx);
   av_frame_free(&ctx->frameDecoded);
-  av_free(ctx->frameRGB->data[0]);
-  av_frame_free(&ctx->frameRGB);
+  av_free(ctx->frameYUV->data[0]);
+  av_frame_free(&ctx->frameYUV);
   avcodec_free_context(&ctx->codecCtx);
   avformat_close_input(&ctx->formatCtx);
+}
+
+int play_video(VPVidContext *vidCtx, SDL_Renderer *renderer,
+               SDL_Texture *texture) {
+
+  AVPacket packet;
+  int frameIdx = 0;
+  while (av_read_frame(vidCtx->formatCtx, &packet) >= 0) {
+    // Check packet from video stream
+    if (packet.stream_index == vidCtx->videoStreamIdx) {
+      // Should I send many and read many in this inner loop?
+
+      // Try to send packet for decoding
+      int sendRet = avcodec_send_packet(vidCtx->codecCtx, &packet);
+      if (sendRet == AVERROR(EAGAIN)) {
+        // need to try reading
+      } else if (sendRet < 0) {
+        LOG_ERROR("avcodec_send_packet failed\n");
+        return -1;
+      }
+      // Try to read a frame from decoder
+      int recvRet =
+          avcodec_receive_frame(vidCtx->codecCtx, vidCtx->frameDecoded);
+      if (recvRet == AVERROR(EAGAIN)) {
+        // Can't receive a frame, need to try to send again
+      } else if (recvRet < 0) {
+        LOG_ERROR("avcodec_receive_frame failed\n");
+        return -1;
+      } else {
+        // Got a frame
+        sws_scale(vidCtx->swsCtx,
+                  (uint8_t const *const *)vidCtx->frameDecoded->data,
+                  vidCtx->frameDecoded->linesize, 0, vidCtx->codecCtx->height,
+                  vidCtx->frameYUV->data, vidCtx->frameYUV->linesize);
+        frameIdx++;
+
+        assert(vidCtx->frameYUV->linesize[0] == SCREEN_WIDTH);
+        assert(SCREEN_WIDTH * SDL_BYTESPERPIXEL(SDL_PIXELFORMAT_IYUV) ==
+               SCREEN_WIDTH);
+
+        // YUV - Y has 1 byte per pixel
+        assert(vidCtx->frameYUV->data[1] ==
+               vidCtx->frameYUV->data[0] + SCREEN_WIDTH * SCREEN_HEIGHT * 1);
+        assert(vidCtx->frameYUV->data[2] ==
+               vidCtx->frameYUV->data[1] +
+                   SCREEN_WIDTH * SCREEN_HEIGHT * 1 / 2 / 2);
+
+        if (SDL_UpdateTexture(
+                texture, NULL, vidCtx->frameYUV->data[0],
+                SCREEN_WIDTH * SDL_BYTESPERPIXEL(SDL_PIXELFORMAT_IYUV)) < 0) {
+          LOG_SDL_ERROR("SDL_UpdateTexture failed");
+          return -1;
+        }
+        SDL_RenderCopy(renderer, texture, NULL, NULL);
+        SDL_RenderPresent(renderer);
+        SDL_Delay(10);
+      }
+    }
+    av_packet_unref(&packet);
+  }
+  return 0;
 }
 
 int main(int argc, char *argv[]) {
@@ -166,9 +239,12 @@ int main(int argc, char *argv[]) {
     return -1;
   }
 
-  SDL_Texture *texture =
-      SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGB24,
-                        SDL_TEXTUREACCESS_STATIC, SCREEN_WIDTH, SCREEN_HEIGHT);
+  // What does SDL_TEXTUREACCESS_ do?
+  // or SDL_PIXELFORMAT_IYUV
+  SDL_Texture *texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_IYUV,
+                                           SDL_TEXTUREACCESS_STREAMING,
+                                           SCREEN_WIDTH, SCREEN_HEIGHT);
+
   if (texture == NULL) {
     LOG_SDL_ERROR("SDL_CreateTexture");
     SDL_DestroyRenderer(renderer);
@@ -177,13 +253,14 @@ int main(int argc, char *argv[]) {
     return -1;
   }
 
-  // SDL_Surface *screen;
-  // screen = SDL_setVideo
-
   VPVidContext vidCtx;
   if (create_vidplay_context(&vidCtx, argv[1]) < 0) {
     LOG_ERROR("create_vidplay_context failed");
     return -1;
+  }
+
+  if (play_video(&vidCtx, renderer, texture) < 0) {
+    LOG_ERROR("play_video failed");
   }
 
   close_vidplay_context(&vidCtx);
