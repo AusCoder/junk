@@ -167,73 +167,78 @@ int play_video(VPVidContext *vidCtx, SDL_Renderer *renderer,
       // Try to send packet for decoding
       int sendRet = avcodec_send_packet(vidCtx->codecCtx, &packet);
       if (sendRet == AVERROR(EAGAIN)) {
-        // need to try reading
+        // try receiving frames
       } else if (sendRet < 0) {
         LOG_ERROR("avcodec_send_packet failed\n");
         return -1;
       }
+
       // Try to read a frame from decoder
-      int recvRet =
-          avcodec_receive_frame(vidCtx->codecCtx, vidCtx->frameDecoded);
-      if (recvRet == AVERROR(EAGAIN)) {
-        // Can't receive a frame, need to try to send again
-      } else if (recvRet < 0) {
-        LOG_ERROR("avcodec_receive_frame failed\n");
-        return -1;
-      } else {
-        // Got a frame
-        sws_scale(vidCtx->swsCtx,
-                  (uint8_t const *const *)vidCtx->frameDecoded->data,
-                  vidCtx->frameDecoded->linesize, 0, vidCtx->codecCtx->height,
-                  vidCtx->frameYUV->data, vidCtx->frameYUV->linesize);
-        frameIdx++;
-
-        assert(vidCtx->frameYUV->linesize[0] == SCREEN_WIDTH);
-        assert(SCREEN_WIDTH * SDL_BYTESPERPIXEL(SDL_PIXELFORMAT_IYUV) ==
-               SCREEN_WIDTH);
-
-        // YUV - Y has 1 byte per pixel
-        assert(vidCtx->frameYUV->data[1] ==
-               vidCtx->frameYUV->data[0] + SCREEN_WIDTH * SCREEN_HEIGHT * 1);
-        assert(vidCtx->frameYUV->data[2] ==
-               vidCtx->frameYUV->data[1] +
-                   SCREEN_WIDTH * SCREEN_HEIGHT * 1 / 2 / 2);
-
-        // // SDL_UpdateTexture version
-        // // I'm not sure this is correct. If there is padding from libav,
-        // // there might be problems
-        // if (SDL_UpdateTexture(
-        //         texture, NULL, vidCtx->frameYUV->data[0],
-        //         SCREEN_WIDTH * SDL_BYTESPERPIXEL(SDL_PIXELFORMAT_IYUV)) < 0)
-        //         {
-        //   LOG_SDL_ERROR("SDL_UpdateTexture failed");
-        //   return -1;
-        // }
-
-        // SDL_LockTexture version
-        uint8_t *pixels;
-        int pitch;
-        if (SDL_LockTexture(texture, NULL, (void **)&pixels, &pitch) < 0) {
-          LOG_SDL_ERROR("SDL_LockTexture failed");
+      while (1) {
+        int recvRet =
+            avcodec_receive_frame(vidCtx->codecCtx, vidCtx->frameDecoded);
+        if (recvRet == AVERROR(EAGAIN)) {
+          // Can't receive a frame, need to try to send again
+          break;
+        } else if (recvRet < 0) {
+          LOG_ERROR("avcodec_receive_frame failed\n");
           return -1;
-        }
-        for (int plane = 0; plane < 3; plane++) {
-          int widthBytes = (plane == 0 ? SCREEN_WIDTH : SCREEN_WIDTH / 2) *
-                           SDL_BYTESPERPIXEL(SDL_PIXELFORMAT_IYUV);
-          int height = plane == 0 ? SCREEN_HEIGHT : SCREEN_HEIGHT / 2;
-          int avFrameOffset = 0;
-          for (int y = 0; y < height; y++) {
-            memcpy(pixels, vidCtx->frameYUV->data[plane] + avFrameOffset,
-                   widthBytes);
-            avFrameOffset += widthBytes;
-            pixels += widthBytes;
-          }
-        }
-        SDL_UnlockTexture(texture);
+        } else {
+          // Got a frame
+          sws_scale(vidCtx->swsCtx,
+                    (uint8_t const *const *)vidCtx->frameDecoded->data,
+                    vidCtx->frameDecoded->linesize, 0, vidCtx->codecCtx->height,
+                    vidCtx->frameYUV->data, vidCtx->frameYUV->linesize);
+          frameIdx++;
 
-        SDL_RenderCopy(renderer, texture, NULL, NULL);
-        SDL_RenderPresent(renderer);
-        SDL_Delay(10);
+          assert(vidCtx->frameYUV->linesize[0] == SCREEN_WIDTH);
+          assert(SCREEN_WIDTH * SDL_BYTESPERPIXEL(SDL_PIXELFORMAT_IYUV) ==
+                 SCREEN_WIDTH);
+
+          // YUV - Y has 1 byte per pixel
+          assert(vidCtx->frameYUV->data[1] ==
+                 vidCtx->frameYUV->data[0] + SCREEN_WIDTH * SCREEN_HEIGHT * 1);
+          assert(vidCtx->frameYUV->data[2] ==
+                 vidCtx->frameYUV->data[1] +
+                     SCREEN_WIDTH * SCREEN_HEIGHT * 1 / 2 / 2);
+
+          // // SDL_UpdateTexture version
+          // // I'm not sure this is correct. If there is padding from libav,
+          // // there might be problems
+          // if (SDL_UpdateTexture(
+          //         texture, NULL, vidCtx->frameYUV->data[0],
+          //         SCREEN_WIDTH * SDL_BYTESPERPIXEL(SDL_PIXELFORMAT_IYUV)) <
+          //         0)
+          //         {
+          //   LOG_SDL_ERROR("SDL_UpdateTexture failed");
+          //   return -1;
+          // }
+
+          // SDL_LockTexture version
+          uint8_t *pixels;
+          int pitch;
+          if (SDL_LockTexture(texture, NULL, (void **)&pixels, &pitch) < 0) {
+            LOG_SDL_ERROR("SDL_LockTexture failed");
+            return -1;
+          }
+          for (int plane = 0; plane < 3; plane++) {
+            int widthBytes = (plane == 0 ? SCREEN_WIDTH : SCREEN_WIDTH / 2) *
+                             SDL_BYTESPERPIXEL(SDL_PIXELFORMAT_IYUV);
+            int height = plane == 0 ? SCREEN_HEIGHT : SCREEN_HEIGHT / 2;
+            int avFrameOffset = 0;
+            for (int y = 0; y < height; y++) {
+              memcpy(pixels, vidCtx->frameYUV->data[plane] + avFrameOffset,
+                     widthBytes);
+              avFrameOffset += widthBytes;
+              pixels += widthBytes;
+            }
+          }
+          SDL_UnlockTexture(texture);
+
+          SDL_RenderCopy(renderer, texture, NULL, NULL);
+          SDL_RenderPresent(renderer);
+          SDL_Delay(10);
+        }
       }
     }
     av_packet_unref(&packet);
