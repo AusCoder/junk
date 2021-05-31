@@ -14,8 +14,8 @@ Questions:
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_thread.h>
 
-#define SCREEN_WIDTH 640
-#define SCREEN_HEIGHT 480
+#define SCREEN_WIDTH (640 * 2)
+#define SCREEN_HEIGHT (480 * 2)
 
 #define LOG_ERROR(msg) fprintf(stderr, "Error: %s\n", (msg))
 
@@ -199,12 +199,38 @@ int play_video(VPVidContext *vidCtx, SDL_Renderer *renderer,
                vidCtx->frameYUV->data[1] +
                    SCREEN_WIDTH * SCREEN_HEIGHT * 1 / 2 / 2);
 
-        if (SDL_UpdateTexture(
-                texture, NULL, vidCtx->frameYUV->data[0],
-                SCREEN_WIDTH * SDL_BYTESPERPIXEL(SDL_PIXELFORMAT_IYUV)) < 0) {
-          LOG_SDL_ERROR("SDL_UpdateTexture failed");
+        // // SDL_UpdateTexture version
+        // // I'm not sure this is correct. If there is padding from libav,
+        // // there might be problems
+        // if (SDL_UpdateTexture(
+        //         texture, NULL, vidCtx->frameYUV->data[0],
+        //         SCREEN_WIDTH * SDL_BYTESPERPIXEL(SDL_PIXELFORMAT_IYUV)) < 0)
+        //         {
+        //   LOG_SDL_ERROR("SDL_UpdateTexture failed");
+        //   return -1;
+        // }
+
+        // SDL_LockTexture version
+        uint8_t *pixels;
+        int pitch;
+        if (SDL_LockTexture(texture, NULL, (void **)&pixels, &pitch) < 0) {
+          LOG_SDL_ERROR("SDL_LockTexture failed");
           return -1;
         }
+        for (int plane = 0; plane < 3; plane++) {
+          int widthBytes = (plane == 0 ? SCREEN_WIDTH : SCREEN_WIDTH / 2) *
+                           SDL_BYTESPERPIXEL(SDL_PIXELFORMAT_IYUV);
+          int height = plane == 0 ? SCREEN_HEIGHT : SCREEN_HEIGHT / 2;
+          int avFrameOffset = 0;
+          for (int y = 0; y < height; y++) {
+            memcpy(pixels, vidCtx->frameYUV->data[plane] + avFrameOffset,
+                   widthBytes);
+            avFrameOffset += widthBytes;
+            pixels += widthBytes;
+          }
+        }
+        SDL_UnlockTexture(texture);
+
         SDL_RenderCopy(renderer, texture, NULL, NULL);
         SDL_RenderPresent(renderer);
         SDL_Delay(10);
@@ -212,6 +238,7 @@ int play_video(VPVidContext *vidCtx, SDL_Renderer *renderer,
     }
     av_packet_unref(&packet);
   }
+  printf("Frames seen %d\n", frameIdx);
   return 0;
 }
 
