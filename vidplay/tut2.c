@@ -158,8 +158,20 @@ int play_video(VPVidContext *vidCtx, SDL_Renderer *renderer,
                SDL_Texture *texture) {
 
   AVPacket packet;
+  SDL_Event event;
   int frameIdx = 0;
   while (av_read_frame(vidCtx->formatCtx, &packet) >= 0) {
+    // Handle events
+    SDL_PollEvent(&event);
+    switch (event.type) {
+    case SDL_QUIT:
+      av_packet_unref(&packet);
+      return 0;
+      break;
+    default:
+      break;
+    }
+
     // Check packet from video stream
     if (packet.stream_index == vidCtx->videoStreamIdx) {
       // Should I send many and read many in this inner loop?
