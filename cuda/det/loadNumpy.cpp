@@ -9,8 +9,7 @@ using namespace std;
 #define TFLOAT float
 
 int main(int argc, char **argv) {
-  char arrayFilename[] =
-      "/home/seb/code/ii/ml-source/mtcnn-output-arrays/stage-one/prob-0.npy";
+  char arrayFilename[] = "./mtcnn-output-arrays/stage-one/prob-0.npy";
   cnpy::NpyArray arr = cnpy::npy_load(arrayFilename);
 
   vector<TFLOAT> prob = arr.as_vec<TFLOAT>();

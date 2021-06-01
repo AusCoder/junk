@@ -16,9 +16,7 @@
 #define FRAME_HEIGHT 720.0
 
 int main() {
-  std::string videoFilepath{"/data/cortex-extras-data/staging/videos/"
-                            "ml-error_3_19c4bf63-88e1-400b-a5d5-d6993e183826/"
-                            "data/video/2020-10-19/1603145636294000000.ts"};
+  std::string videoFilepath{"input.ts"};
   auto cap = cv::VideoCapture(videoFilepath);
   if (!cap.isOpened()) {
     std::cerr << "Failed to open video capture\n";

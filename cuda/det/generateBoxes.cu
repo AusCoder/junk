@@ -154,7 +154,7 @@ int main(int argc, char **argv) {
   int maxOutIndices = 500;
 
   char arrayFilename[] =
-      "/home/seb/code/ii/ml-source/mtcnn-output-arrays/stage-one/prob-0.npy";
+      "./mtcnn-output-arrays/stage-one/prob-0.npy";
   cnpy::NpyArray arr = cnpy::npy_load(arrayFilename);
   vector<float> items = arr.as_vec<float>();
   int height = arr.shape.at(1);

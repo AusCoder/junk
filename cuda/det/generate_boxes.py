@@ -31,7 +31,7 @@ if __name__ == "__main__":
     # threshold = 0.5
     # scale = 1.0
 
-    array_path = "/home/seb/code/ii/ml-source/mtcnn-output-arrays/stage-one/prob-0.npy"
+    array_path = "./mtcnn-output-arrays/stage-one/prob-0.npy"
     (prob,) = np.load(array_path)
     reg = np.ones_like(prob)
     threshold = 0.95

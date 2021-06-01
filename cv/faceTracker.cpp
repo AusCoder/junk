@@ -241,8 +241,8 @@ private:
 };
 
 int main(int argc, char **argv) {
-  std::string videoFilepath{"/home/seb/Downloads/1601429081287000000.ts"};
-  // std::string videoFilepath{"/home/seb/Downloads/output.mp4"};
+  std::string videoFilepath{"./input.ts"};
+  // std::string videoFilepath{"./output.mp4"};
 
   auto cap = cv::VideoCapture(videoFilepath);
   if (!cap.isOpened()) {
