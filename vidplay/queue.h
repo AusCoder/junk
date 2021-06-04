@@ -26,20 +26,31 @@ typedef struct {
   int size;
 } VPQueue;
 
-int queue_init(VPQueue *q) {
-  q->mutex = SDL_CreateMutex();
-  if (q->mutex == NULL) {
-    return -1;
+VPQueue *queue_alloc() {
+  SDL_mutex *mutex = SDL_CreateMutex();
+  if (mutex == NULL) {
+    return NULL;
   }
-  q->cond = SDL_CreateCond();
+  SDL_cond *cond = SDL_CreateCond();
+  if (cond == NULL) {
+    SDL_DestroyMutex(mutex);
+    return NULL;
+  }
+  VPQueue *q = (VPQueue *)malloc(sizeof(VPQueue));
+  if (q == NULL) {
+    SDL_DestroyMutex(mutex);
+    SDL_DestroyCond(cond);
+    return NULL;
+  }
+  q->mutex = mutex;
+  q->cond = cond;
   q->head = NULL;
   q->tail = NULL;
   q->size = 0;
-
-  return 0;
+  return q;
 }
 
-void queue_close(VPQueue *q) {
+void queue_free(VPQueue *q) {
   SDL_LockMutex(q->mutex);
   VPQueueItem *i = q->head;
   while (i != NULL) {
@@ -54,23 +65,30 @@ void queue_close(VPQueue *q) {
   q->head = NULL;
   q->tail = NULL;
   q->size = 0;
+  free(q);
 }
 
 int queue_put(VPQueue *q, const void *value) {
-  // TODO: replace with cond
+  VPQueueItem *item = malloc(sizeof(VPQueueItem));
+  if (item == NULL) {
+    return -2;
+  }
+  item->next = NULL;
+  item->value = value;
+
   if (SDL_LockMutex(q->mutex) < 0) {
     return -1;
   }
-  VPQueueItem *item = malloc(sizeof(VPQueueItem));
-  item->next = NULL;
-  item->value = value;
   if (q->head == NULL) {
     assert(q->tail == NULL);
     q->head = item;
-    q->tail = item;
   } else {
     q->tail->next = item;
-    q->tail = item;
+  }
+  q->tail = item;
+  q->size++;
+  if (SDL_CondSignal(q->cond) < 0) {
+    return -1;
   }
   if (SDL_UnlockMutex(q->mutex) < 0) {
     return -1;
@@ -78,6 +96,27 @@ int queue_put(VPQueue *q, const void *value) {
   return 0;
 }
 
-int queue_get(VPQueue *q, void **value) { return 0; }
+int queue_get(VPQueue *q, const void **value) {
+  if (SDL_LockMutex(q->mutex) < 0) {
+    return -1;
+  }
+  while (q->head == NULL) {
+    if (SDL_CondWait(q->cond, q->mutex) < 0) {
+      return -1;
+    }
+  }
+  VPQueueItem *item = q->head;
+  q->head = q->head->next;
+  q->size--;
+  if (q->head == NULL) {
+    q->tail = NULL;
+  }
+  *value = item->value;
+  free(item);
+  if (SDL_UnlockMutex(q->mutex) < 0) {
+    return -1;
+  }
+  return 0;
+}
 
 #endif // _QUEUE
