@@ -15,6 +15,7 @@
 #define SCREEN_WIDTH (640 * 2)
 #define SCREEN_HEIGHT (480 * 2)
 #define AUDIO_SAMPLE_SIZE 1024
+#define MAX_AUDIO_FRAME_SIZE 192000
 
 #define LOG_ERROR(msg) fprintf(stderr, "Error: %s\n", (msg))
 
@@ -28,7 +29,9 @@ typedef struct {
   SDL_Window *window;
   SDL_Renderer *renderer;
   SDL_Texture *texture;
+  // audio
   SDL_AudioSpec *audioSpec;
+  SDL_AudioDeviceID audioDeviceId;
 } VPPresContext;
 
 // video decoding context
@@ -40,7 +43,7 @@ typedef struct {
   AVCodecParameters *vCodecPar;
   AVCodec *vCodec;
   AVCodecContext *vCodecCtx;
-  // auto
+  // audio
   AVCodecParameters *aCodecPar;
   AVCodec *aCodec;
   AVCodecContext *aCodecCtx;
@@ -48,6 +51,9 @@ typedef struct {
   AVFrame *frameDecoded;
   AVFrame *frameYUV;
   struct SwsContext *swsCtx;
+  // Audio queue
+  VPQueue *audioQueue;
+  int isRunning;
   // unused
   uint8_t *bufYUV;
 } VPVidContext;
@@ -88,36 +94,54 @@ int pres_context_init(VPPresContext *presCtx, SDL_AudioSpec *wantedAudioSpec) {
     return -1;
   }
 
-  SDL_AudioSpec *spec = NULL;
+  SDL_AudioSpec *receivedAudioSpec = NULL;
+  SDL_AudioDeviceID audioDeviceId = 0;
   if (wantedAudioSpec != NULL) {
     LOG_WARNING("creating sdl audio");
-    spec = (SDL_AudioSpec *)malloc(sizeof(SDL_AudioSpec));
-    if (spec == NULL) {
+    receivedAudioSpec = (SDL_AudioSpec *)malloc(sizeof(SDL_AudioSpec));
+    if (receivedAudioSpec == NULL) {
       LOG_ERROR("malloc failed");
+      SDL_DestroyTexture(texture);
       SDL_DestroyRenderer(renderer);
       SDL_DestroyWindow(window);
       SDL_Quit();
       return -1;
     }
-    if (SDL_OpenAudio(wantedAudioSpec, spec) < 0) {
-      LOG_SDL_ERROR("SDL_OpenAudio failed");
-      free(spec);
+    audioDeviceId =
+        SDL_OpenAudioDevice(NULL, 0, wantedAudioSpec, receivedAudioSpec,
+                            SDL_AUDIO_ALLOW_FORMAT_CHANGE);
+    if (audioDeviceId <= 0) {
+      LOG_SDL_ERROR("SDL_OpenAudioDevice failed");
+      free(receivedAudioSpec);
+      SDL_DestroyTexture(texture);
       SDL_DestroyRenderer(renderer);
       SDL_DestroyWindow(window);
       SDL_Quit();
       return -1;
     }
+    if (wantedAudioSpec->format != receivedAudioSpec->format) {
+      // Something else?
+      LOG_WARNING("didn't get expected audio format");
+    }
+    SDL_PauseAudioDevice(audioDeviceId, 0);
   }
 
   presCtx->window = window;
   presCtx->renderer = renderer;
   presCtx->texture = texture;
-  presCtx->audioSpec = spec;
+  // audio
+  presCtx->audioSpec = receivedAudioSpec;
+  presCtx->audioDeviceId = audioDeviceId;
   return 0;
 }
 
 static void pres_context_close(VPPresContext *presCtx) {
-  free(presCtx->audioSpec);
+  if (presCtx->audioSpec != NULL) {
+    free(presCtx->audioSpec);
+  }
+  if (presCtx->audioDeviceId > 0) {
+    SDL_CloseAudioDevice(presCtx->audioDeviceId);
+  }
   SDL_DestroyTexture(presCtx->texture);
   SDL_DestroyRenderer(presCtx->renderer);
   SDL_DestroyWindow(presCtx->window);
@@ -155,6 +179,8 @@ static void vid_context_close_codec_context(AVCodecContext **codecCtx) {
 }
 
 static int vid_context_init(VPVidContext *vidCtx, const char *path) {
+  // TODO:
+  //   missing audio clean up on some failure cases
   AVFormatContext *pFormatCtx = NULL;
   if (avformat_open_input(&pFormatCtx, path, NULL, NULL) != 0) {
     return -1;
@@ -251,8 +277,22 @@ static int vid_context_init(VPVidContext *vidCtx, const char *path) {
     avformat_close_input(&pFormatCtx);
     return -1;
   }
+
+  VPQueue *q = queue_alloc();
+  if (q == NULL) {
+    LOG_ERROR("queue_alloc failed");
+    sws_freeContext(pSwsCtx);
+    av_free(buffer);
+    av_frame_free(&pFrameDecoded);
+    av_frame_free(&pFrameYUV);
+    vid_context_close_codec_context(&vCodecCtx);
+    avformat_close_input(&pFormatCtx);
+    return -1;
+  }
+
   vidCtx->formatCtx = pFormatCtx;
   vidCtx->videoStreamIdx = videoStreamIdx;
+  vidCtx->audioStreamIdx = audioStreamIdx;
 
   vidCtx->vCodecPar = vCodecPar;
   vidCtx->vCodec = vCodec;
@@ -265,11 +305,21 @@ static int vid_context_init(VPVidContext *vidCtx, const char *path) {
   vidCtx->frameDecoded = pFrameDecoded;
   vidCtx->frameYUV = pFrameYUV;
   vidCtx->swsCtx = pSwsCtx;
+
+  vidCtx->audioQueue = q;
+  vidCtx->isRunning = 1;
+
   vidCtx->bufYUV = NULL;
   return 0;
 }
 
 void vid_context_close(VPVidContext *ctx) {
+  // audio
+  queue_free(ctx->audioQueue);
+  if (ctx->aCodecCtx != NULL) {
+    vid_context_close_codec_context(&ctx->aCodecCtx);
+  }
+  // video
   sws_freeContext(ctx->swsCtx);
   av_frame_free(&ctx->frameDecoded);
   av_free(ctx->frameYUV->data[0]);
@@ -277,6 +327,34 @@ void vid_context_close(VPVidContext *ctx) {
   vid_context_close_codec_context(&ctx->vCodecCtx);
   avformat_close_input(&ctx->formatCtx);
 }
+
+// static int get_format_from_sample_fmt(const char **fmt,
+//                                       enum AVSampleFormat sample_fmt) {
+//   int i;
+//   struct sample_fmt_entry {
+//     enum AVSampleFormat sample_fmt;
+//     const char *fmt_be, *fmt_le;
+//   } sample_fmt_entries[] = {
+//       {AV_SAMPLE_FMT_U8, "u8", "u8"},
+//       {AV_SAMPLE_FMT_S16, "s16be", "s16le"},
+//       {AV_SAMPLE_FMT_S32, "s32be", "s32le"},
+//       {AV_SAMPLE_FMT_FLT, "f32be", "f32le"},
+//       {AV_SAMPLE_FMT_DBL, "f64be", "f64le"},
+//   };
+//   *fmt = NULL;
+
+//   for (i = 0; i < FF_ARRAY_ELEMS(sample_fmt_entries); i++) {
+//     struct sample_fmt_entry *entry = &sample_fmt_entries[i];
+//     if (sample_fmt == entry->sample_fmt) {
+//       *fmt = AV_NE(entry->fmt_be, entry->fmt_le);
+//       return 0;
+//     }
+//   }
+
+//   fprintf(stderr, "sample format %s is not supported as output format\n",
+//           av_get_sample_fmt_name(sample_fmt));
+//   return -1;
+// }
 
 static int present_frame(VPVidContext *vidCtx, VPPresContext *presCtx) {
   sws_scale(vidCtx->swsCtx, (uint8_t const *const *)vidCtx->frameDecoded->data,
@@ -319,7 +397,7 @@ static int present_frame(VPVidContext *vidCtx, VPPresContext *presCtx) {
   return 0;
 }
 
-static int play_video(VPVidContext *vidCtx, VPPresContext *presCtx) {
+static int playVideo(VPVidContext *vidCtx, VPPresContext *presCtx) {
   AVPacket packet;
   SDL_Event event;
   int frameIdx = 0;
@@ -328,6 +406,7 @@ static int play_video(VPVidContext *vidCtx, VPPresContext *presCtx) {
     SDL_PollEvent(&event);
     switch (event.type) {
     case SDL_QUIT:
+      vidCtx->isRunning = 0;
       av_packet_unref(&packet);
       return 0;
       break;
@@ -337,8 +416,6 @@ static int play_video(VPVidContext *vidCtx, VPPresContext *presCtx) {
 
     // Check packet from video stream
     if (packet.stream_index == vidCtx->videoStreamIdx) {
-      // Should I send many and read many in this inner loop?
-
       // Try to send packet for decoding
       int sendRet = avcodec_send_packet(vidCtx->vCodecCtx, &packet);
       if (sendRet == AVERROR(EAGAIN)) {
@@ -366,6 +443,16 @@ static int play_video(VPVidContext *vidCtx, VPPresContext *presCtx) {
           }
         }
       }
+    } else if (packet.stream_index == vidCtx->audioStreamIdx) {
+      AVPacket *packetClone = av_packet_clone(&packet);
+      if (packetClone == NULL) {
+        LOG_ERROR("av_packet_clone failed\n");
+        return -1;
+      }
+      if (queue_put(vidCtx->audioQueue, (const void *)packetClone) < 0) {
+        LOG_ERROR("queue_put failed\n");
+        return -1;
+      }
     }
     av_packet_unref(&packet);
   }
@@ -373,27 +460,157 @@ static int play_video(VPVidContext *vidCtx, VPPresContext *presCtx) {
   return 0;
 }
 
-// void q_test() {
-//   VPQueue *q = queue_alloc();
-//   if (q == NULL) {
-//     LOG_ERROR("queue_init failed");
-//     return;
-//   };
-//   // int x = 1;
-//   int y = 2;
-//   // int z = 3;
-//   queue_put(q, (const void *)&y);
-//   int *elem;
-//   queue_get(q, (const void **)&elem);
-//   printf("From queue: %d\n", *elem);
-//   queue_free(q);
-//   return;
+static int audioDecodeFrame(VPVidContext *vidCtx, uint8_t *audioBuf,
+                            int audioBufSize) {
+  // static AVPacket pkt;
+  AVPacket *pkt;
+  static AVFrame frame;
+  for (;;) {
+    if (!vidCtx->isRunning) {
+      return -1;
+    }
+    if (queue_get(vidCtx->audioQueue, (const void **)&pkt) < 0) {
+      LOG_ERROR("queue_get failed\n");
+      return -1;
+    }
+    int sendRet = avcodec_send_packet(vidCtx->aCodecCtx, pkt);
+    if ((sendRet < 0) && (sendRet != AVERROR(EAGAIN))) {
+      LOG_ERROR("avcodec_send_packet failed\n");
+      av_packet_free(&pkt);
+      return -1;
+    }
+
+    while (1) {
+      int recvRet = avcodec_receive_frame(vidCtx->aCodecCtx, &frame);
+      if (recvRet == AVERROR(EAGAIN)) {
+        break;
+      } else if (recvRet < 0) {
+        LOG_ERROR("avcodec_receive_frame failed\n");
+        av_packet_free(&pkt);
+        return -1;
+      } else {
+        // Got a frame
+
+        int frameBufSize = av_samples_get_buffer_size(
+            NULL, vidCtx->aCodecCtx->channels, frame.nb_samples,
+            vidCtx->aCodecCtx->sample_fmt, 1);
+        assert(frameBufSize <= audioBufSize);
+
+        // // planar audio format
+        // // TODO: add a check using av_sample_fmt_is_planar
+        // int bsPerSamples =
+        //     av_get_bytes_per_sample(vidCtx->aCodecCtx->sample_fmt);
+        // // printf("bsPerSamples: %d\n", bsPerSamples);
+        // for (int sIdx = 0; sIdx < frame.nb_samples; sIdx++) {
+        //   for (int cIdx = 0; cIdx < vidCtx->aCodecCtx->channels; cIdx++) {
+        //     memcpy(audioBuf, frame.data[cIdx] + sIdx * bsPerSamples,
+        //            bsPerSamples);
+        //   }
+        // }
+
+        memset(audioBuf, 10, frameBufSize);
+
+        // printf("frameBufSize: %d\n", frameBufSize);
+        // memcpy(audioBuf, frame.data[0], frameBufSize);
+        av_packet_free(&pkt);
+        return frameBufSize;
+      }
+    }
+    av_packet_free(&pkt);
+  }
+}
+
+// static int audioDecodeFrame(VPVidContext *vidCtx, uint8_t *audioBuf,
+//                             int audioBufSize) {
+//   static AVPacket pkt;
+//   static uint8_t *audioPktData = NULL;
+//   static int audioPktSize = 0;
+//   static AVFrame frame;
+
+//   int len1, dataSize = 0;
+
+//   for (;;) {
+//     while (audioPktSize > 0) {
+// int sendRet = avcodec_send_packet(vidCtx->aCodecCtx, &pkt);
+// if (sendRet == AVERROR(EAGAIN)) {
+// } else if (sendRet < 0) {
+//   LOG_ERROR("avcodec_send_packet failed\n");
+//   return -1;
 // }
 
-int main(int argc, char *argv[]) {
-  // q_test();
-  // return 0;
+// // Try to read a frame from decoder
+// while (1) {
+//   int recvRet = avcodec_receive_frame(vidCtx->aCodecCtx, &frame);
+//   if (recvRet == AVERROR(EAGAIN)) {
+//     // Can't receive a frame, need to try to send again
+//     break;
+//   } else if (recvRet < 0) {
+//     LOG_ERROR("avcodec_receive_frame failed\n");
+//     return -1;
+//   } else {
+//     int frameSize = frame.linesize[0];
+//     audioPktData += frameSize;
+//     audioPktSize -= frameSize;
 
+//     // // Got a frame
+//     // if (present_frame(vidCtx, presCtx) < 0) {
+//     //   return -1;
+//     // }
+//   }
+// }
+//     }
+// if (pkt.data) {
+//   av_free_packet(&pkt);
+// }
+// if (!vidCtx->isRunning) {
+//   return -1;
+// }
+// // non block
+// if (queue_get(vidCtx->audioQueue, (void **)&pkt) < 0) {
+//   return -1;
+// }
+//     audioPktData = pkt.data;
+//     audioPktSize = pkt.size;
+//   }
+// }
+
+// typedef void (SDLCALL * SDL_AudioCallback) (void *userdata, Uint8 * stream,
+//                                             int len);
+static void audioCallback(void *userdata, Uint8 *stream, int len) {
+  VPVidContext *vidCtx = (VPVidContext *)userdata;
+  int len1, audio_size;
+
+  static uint8_t audio_buf[(MAX_AUDIO_FRAME_SIZE * 3) / 2];
+  static unsigned int audio_buf_size = 0;
+  static unsigned int audio_buf_index = 0;
+
+  while (len > 0) {
+    // Note: this arithmetic all seems too complicated
+    // it can be simplified.
+    if (audio_buf_index >= audio_buf_size) {
+      // Add more data
+      audio_size = audioDecodeFrame(vidCtx, audio_buf, sizeof(audio_buf));
+      if (audio_size < 0) {
+        // If error, output silence
+        audio_buf_size = 1024;
+        memset(audio_buf, 0, audio_buf_size);
+      } else {
+        audio_buf_size = audio_size;
+      }
+      audio_buf_index = 0;
+    }
+    len1 = audio_buf_size - audio_buf_index;
+    if (len1 > len) {
+      len1 = len;
+    }
+    memcpy(stream, (uint8_t *)audio_buf + audio_buf_index, len1);
+    len -= len1;
+    stream += len1;
+    audio_buf_index += len1;
+  }
+}
+
+int main(int argc, char *argv[]) {
   VPVidContext vidCtx;
   if (vid_context_init(&vidCtx, argv[1]) < 0) {
     LOG_ERROR("vid_context_init failed");
@@ -403,12 +620,17 @@ int main(int argc, char *argv[]) {
   SDL_AudioSpec wantedAudioSpec;
   SDL_AudioSpec *p_wantedAudioSpec = NULL;
   if (vidCtx.audioStreamIdx >= 0) {
-    wantedAudioSpec.freq = vidCtx.aCodecCtx->sample_rate;
-    wantedAudioSpec.format = AUDIO_S16SYS;
-    wantedAudioSpec.samples = AUDIO_SAMPLE_SIZE;
-    wantedAudioSpec.silence = 0;
-    wantedAudioSpec.callback = NULL; // TODO: work from here
+    printf("Sample format: %s. Number hannels: %d\n",
+           av_get_sample_fmt_name(vidCtx.aCodecCtx->sample_fmt),
+           vidCtx.aCodecCtx->channels);
 
+    wantedAudioSpec.freq = vidCtx.aCodecCtx->sample_rate;
+    wantedAudioSpec.format = AUDIO_F32;
+    wantedAudioSpec.channels = vidCtx.aCodecCtx->channels;
+    wantedAudioSpec.silence = 0;
+    wantedAudioSpec.samples = AUDIO_SAMPLE_SIZE;
+    wantedAudioSpec.callback = audioCallback;
+    wantedAudioSpec.userdata = (void *)&vidCtx;
     p_wantedAudioSpec = &wantedAudioSpec;
   }
   VPPresContext presCtx;
@@ -417,8 +639,8 @@ int main(int argc, char *argv[]) {
     return -1;
   }
 
-  if (play_video(&vidCtx, &presCtx) < 0) {
-    LOG_ERROR("play_video failed");
+  if (playVideo(&vidCtx, &presCtx) < 0) {
+    LOG_ERROR("playVideo failed");
   }
 
   vid_context_close(&vidCtx);

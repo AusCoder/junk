@@ -42,6 +42,9 @@ See [linesize alignment](https://stackoverflow.com/questions/35678041/what-is-li
 ### Reference counting
 See [here](https://stackoverflow.com/questions/49449411/how-to-use-av-frame-unref-in-ffmpeg).
 
+### Useful resources
+[Example project](https://github.com/rsaxvc/LowLatencyVideoPrototype/blob/master/viewer_sdl.cpp) that does something similar to this code.
+
 ## Dependencies
 For reference, I built these samples on Arch linux with
 ```txt
