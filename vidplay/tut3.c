@@ -393,11 +393,19 @@ static int present_frame(VPVidContext *vidCtx, VPPresContext *presCtx) {
 
   SDL_RenderCopy(presCtx->renderer, presCtx->texture, NULL, NULL);
   SDL_RenderPresent(presCtx->renderer);
-  SDL_Delay(10);
+  SDL_Delay(100);
   return 0;
 }
 
 static int playVideo(VPVidContext *vidCtx, VPPresContext *presCtx) {
+  /* Problem: audio and video frames come interleaved.
+     Currently we are decoding video, presenting, waiting and pushing
+     audio to a separate queue. This means audio buffering to the queue
+     is blocked by video presenting to the screen and the frame delay.
+
+     Instead, we want to queue both frames and audio and present them
+     at the same time.
+   */
   AVPacket packet;
   SDL_Event event;
   int frameIdx = 0;
@@ -426,7 +434,7 @@ static int playVideo(VPVidContext *vidCtx, VPPresContext *presCtx) {
       }
 
       // Try to read a frame from decoder
-      while (1) {
+      for (;;) {
         int recvRet =
             avcodec_receive_frame(vidCtx->vCodecCtx, vidCtx->frameDecoded);
         if (recvRet == AVERROR(EAGAIN)) {
@@ -480,7 +488,7 @@ static int audioDecodeFrame(VPVidContext *vidCtx, uint8_t *audioBuf,
       return -1;
     }
 
-    while (1) {
+    for (;;) {
       int recvRet = avcodec_receive_frame(vidCtx->aCodecCtx, &frame);
       if (recvRet == AVERROR(EAGAIN)) {
         break;
@@ -496,19 +504,22 @@ static int audioDecodeFrame(VPVidContext *vidCtx, uint8_t *audioBuf,
             vidCtx->aCodecCtx->sample_fmt, 1);
         assert(frameBufSize <= audioBufSize);
 
-        // // planar audio format
-        // // TODO: add a check using av_sample_fmt_is_planar
-        // int bsPerSamples =
-        //     av_get_bytes_per_sample(vidCtx->aCodecCtx->sample_fmt);
-        // // printf("bsPerSamples: %d\n", bsPerSamples);
-        // for (int sIdx = 0; sIdx < frame.nb_samples; sIdx++) {
-        //   for (int cIdx = 0; cIdx < vidCtx->aCodecCtx->channels; cIdx++) {
-        //     memcpy(audioBuf, frame.data[cIdx] + sIdx * bsPerSamples,
-        //            bsPerSamples);
-        //   }
-        // }
+        // planar audio format
+        // TODO: add a check using av_sample_fmt_is_planar
+        assert(av_sample_fmt_is_planar(vidCtx->aCodecCtx->sample_fmt));
+        assert(vidCtx->aCodecCtx->channels == 2);
 
-        memset(audioBuf, 10, frameBufSize);
+        int bsPerSample =
+            av_get_bytes_per_sample(vidCtx->aCodecCtx->sample_fmt);
+        assert(bsPerSample == 4);
+        /* printf("bsPerSample: %d\n", bsPerSample); */
+        for (int sIdx = 0; sIdx < frame.nb_samples; sIdx++) {
+          for (int cIdx = 0; cIdx < vidCtx->aCodecCtx->channels; cIdx++) {
+            memcpy(audioBuf, frame.data[cIdx] + sIdx * bsPerSample,
+                   bsPerSample);
+            audioBuf += bsPerSample;
+          }
+        }
 
         // printf("frameBufSize: %d\n", frameBufSize);
         // memcpy(audioBuf, frame.data[0], frameBufSize);
@@ -520,93 +531,32 @@ static int audioDecodeFrame(VPVidContext *vidCtx, uint8_t *audioBuf,
   }
 }
 
-// static int audioDecodeFrame(VPVidContext *vidCtx, uint8_t *audioBuf,
-//                             int audioBufSize) {
-//   static AVPacket pkt;
-//   static uint8_t *audioPktData = NULL;
-//   static int audioPktSize = 0;
-//   static AVFrame frame;
-
-//   int len1, dataSize = 0;
-
-//   for (;;) {
-//     while (audioPktSize > 0) {
-// int sendRet = avcodec_send_packet(vidCtx->aCodecCtx, &pkt);
-// if (sendRet == AVERROR(EAGAIN)) {
-// } else if (sendRet < 0) {
-//   LOG_ERROR("avcodec_send_packet failed\n");
-//   return -1;
-// }
-
-// // Try to read a frame from decoder
-// while (1) {
-//   int recvRet = avcodec_receive_frame(vidCtx->aCodecCtx, &frame);
-//   if (recvRet == AVERROR(EAGAIN)) {
-//     // Can't receive a frame, need to try to send again
-//     break;
-//   } else if (recvRet < 0) {
-//     LOG_ERROR("avcodec_receive_frame failed\n");
-//     return -1;
-//   } else {
-//     int frameSize = frame.linesize[0];
-//     audioPktData += frameSize;
-//     audioPktSize -= frameSize;
-
-//     // // Got a frame
-//     // if (present_frame(vidCtx, presCtx) < 0) {
-//     //   return -1;
-//     // }
-//   }
-// }
-//     }
-// if (pkt.data) {
-//   av_free_packet(&pkt);
-// }
-// if (!vidCtx->isRunning) {
-//   return -1;
-// }
-// // non block
-// if (queue_get(vidCtx->audioQueue, (void **)&pkt) < 0) {
-//   return -1;
-// }
-//     audioPktData = pkt.data;
-//     audioPktSize = pkt.size;
-//   }
-// }
 
 // typedef void (SDLCALL * SDL_AudioCallback) (void *userdata, Uint8 * stream,
 //                                             int len);
+
 static void audioCallback(void *userdata, Uint8 *stream, int len) {
+  // TODO: need to think about the vidCtx->isRunning check
+  // we can probably stuck in the queue_get blocking call in the audio thread
   VPVidContext *vidCtx = (VPVidContext *)userdata;
-  int len1, audio_size;
 
   static uint8_t audio_buf[(MAX_AUDIO_FRAME_SIZE * 3) / 2];
-  static unsigned int audio_buf_size = 0;
-  static unsigned int audio_buf_index = 0;
+  unsigned int audio_buf_size = 0;
 
   while (len > 0) {
-    // Note: this arithmetic all seems too complicated
-    // it can be simplified.
-    if (audio_buf_index >= audio_buf_size) {
-      // Add more data
-      audio_size = audioDecodeFrame(vidCtx, audio_buf, sizeof(audio_buf));
-      if (audio_size < 0) {
-        // If error, output silence
-        audio_buf_size = 1024;
-        memset(audio_buf, 0, audio_buf_size);
-      } else {
-        audio_buf_size = audio_size;
-      }
-      audio_buf_index = 0;
+    // get frame
+    int audio_dec_ret = audioDecodeFrame(vidCtx, audio_buf, sizeof(audio_buf));
+    if (audio_dec_ret < 0) {
+      audio_buf_size = 1024;
+      memset(audio_buf, 0, audio_buf_size);
+    } else {
+      audio_buf_size = audio_dec_ret;
     }
-    len1 = audio_buf_size - audio_buf_index;
-    if (len1 > len) {
-      len1 = len;
-    }
-    memcpy(stream, (uint8_t *)audio_buf + audio_buf_index, len1);
+    // copy frame to SDL audio stream buffer
+    int len1 = audio_buf_size <= len ? audio_buf_size : len;
+    memcpy(stream, audio_buf, len1);
     len -= len1;
     stream += len1;
-    audio_buf_index += len1;
   }
 }
 

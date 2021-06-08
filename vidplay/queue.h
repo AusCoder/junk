@@ -58,17 +58,20 @@ void queue_free(VPQueue *q) {
     free(i);
     i = tmp;
   }
-  SDL_UnlockMutex(q->mutex);
-
-  SDL_DestroyCond(q->cond);
-  SDL_DestroyMutex(q->mutex);
   q->head = NULL;
   q->tail = NULL;
   q->size = 0;
+  SDL_UnlockMutex(q->mutex);
+  SDL_DestroyCond(q->cond);
+  SDL_DestroyMutex(q->mutex);
   free(q);
 }
 
 int queue_put(VPQueue *q, const void *value) {
+  if (SDL_LockMutex(q->mutex) < 0) {
+    return -1;
+  }
+
   VPQueueItem *item = malloc(sizeof(VPQueueItem));
   if (item == NULL) {
     return -2;
@@ -76,9 +79,6 @@ int queue_put(VPQueue *q, const void *value) {
   item->next = NULL;
   item->value = value;
 
-  if (SDL_LockMutex(q->mutex) < 0) {
-    return -1;
-  }
   if (q->head == NULL) {
     assert(q->tail == NULL);
     q->head = item;

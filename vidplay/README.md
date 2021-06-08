@@ -39,6 +39,17 @@ For a 480x640 image, `avFrame->linesize[0]` will be `640 * 3`.
 See [linesize example](https://stackoverflow.com/questions/13286022/can-anyone-help-in-understanding-avframe-linesize).
 See [linesize alignment](https://stackoverflow.com/questions/35678041/what-is-linesize-alignment-meaning).
 
+### Audio encoding
+PCM is a raw audio format, it has a fixed bit depth (ie bits per sample). AAC is a lossy encoded audio format. It does not have a fixed number of bits per sample, [see here](https://superuser.com/questions/553552/how-to-determine-aac-bit-depth). Similarly, mp3 is a lossy encodec audio format.
+
+Here is a good article giving an [overview of audio codecs](https://www.epiphan.com/blog/audio-encoding-demystified/).
+
+Bit rate means the number of bits per time unit. For raw PCM, it can be calculated as
+```
+bit_rate = sample_rate * bit_depth * channels
+```
+For compressed formats, this depends on the compression.
+
 ### Reference counting
 See [here](https://stackoverflow.com/questions/49449411/how-to-use-av-frame-unref-in-ffmpeg).
 
