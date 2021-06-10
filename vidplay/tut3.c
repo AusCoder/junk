@@ -1,4 +1,10 @@
 /* Plays sound!
+
+   Probems with this program:
+   - audio queue get can block at the end
+     when we haven't updated the isRunning boolean
+   - We should decouple reading the file from presenting
+     frames.
  */
 #include <assert.h>
 
@@ -26,6 +32,7 @@
 
 // presentation context
 typedef struct {
+  // video
   SDL_Window *window;
   SDL_Renderer *renderer;
   SDL_Texture *texture;
@@ -36,14 +43,15 @@ typedef struct {
 
 // video decoding context
 typedef struct {
+  // file format
   AVFormatContext *formatCtx;
   int videoStreamIdx;
   int audioStreamIdx;
-  // video
+  // video codec
   AVCodecParameters *vCodecPar;
   AVCodec *vCodec;
   AVCodecContext *vCodecCtx;
-  // audio
+  // audio codec
   AVCodecParameters *aCodecPar;
   AVCodec *aCodec;
   AVCodecContext *aCodecCtx;
