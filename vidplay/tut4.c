@@ -36,6 +36,8 @@
 #define AUDIO_SAMPLE_SIZE 1024
 #define MAX_AUDIO_FRAME_SIZE 192000
 
+static void audioCallback(void *userdata, Uint8 *stream, int len);
+
 // presentation context
 typedef struct {
   // video
@@ -344,7 +346,6 @@ static int vidContextInit(VPVidContext *vidCtx, const char *path) {
 
 void vidContextClose(VPVidContext *ctx) {
   // audio
-  queueFree(ctx->audioQueue);
   if (ctx->aCodecCtx != NULL) {
     vidContextCloseCodecContext(&ctx->aCodecCtx);
   }
@@ -422,7 +423,7 @@ VPContext *contextAllocAndInit(const char *path) {
     wantedAudioSpec.silence = 0;
     wantedAudioSpec.samples = AUDIO_SAMPLE_SIZE;
     wantedAudioSpec.callback = audioCallback;
-    wantedAudioSpec.userdata = (void *)&vidCtx;
+    wantedAudioSpec.userdata = (void *)&ctx;
     wantedAudioSpecPtr = &wantedAudioSpec;
   }
 
@@ -539,8 +540,8 @@ static int packetThreadTarget(VPContext *ctx) {
       break;
     }
 
-    if (ctx->commCtx->videoPacketQueue.size > MAX_QUEUE_SIZE ||
-        ctx->commCtx->audioPacketQueue.size > MAX_QUEUE_SIZE) {
+    if (ctx->commCtx->videoPacketQueue->size > MAX_QUEUE_SIZE ||
+        ctx->commCtx->audioPacketQueue->size > MAX_QUEUE_SIZE) {
       SDL_Delay(10);
       continue;
     }
@@ -637,20 +638,23 @@ static int packetThreadTarget(VPContext *ctx) {
   /* return 0; */
 /* } */
 
-static int audioDecodeFrame(VPVidContext *vidCtx, uint8_t *audioBuf,
+static int videoDecodeThreadTarget() {
+}
+
+static int audioDecodeFrame(VPContext *ctx, uint8_t *audioBuf,
                             int audioBufSize) {
   // static AVPacket pkt;
   AVPacket *pkt;
   static AVFrame frame;
   for (;;) {
-    if (!vidCtx->isRunning) {
+    if (!ctx->isRunning) {
       return -1;
     }
-    if (queueGet(vidCtx->audioQueue, (const void **)&pkt) < 0) {
+    if (queueGet(ctx->commCtx->audioPacketQueue, (const void **)&pkt, 1, 0) < 0) {
       LOG_ERROR("queueGet failed\n");
       return -1;
     }
-    int sendRet = avcodec_send_packet(vidCtx->aCodecCtx, pkt);
+    int sendRet = avcodec_send_packet(ctx->vidCtx->aCodecCtx, pkt);
     if ((sendRet < 0) && (sendRet != AVERROR(EAGAIN))) {
       LOG_ERROR("avcodec_send_packet failed\n");
       av_packet_free(&pkt);
@@ -658,7 +662,7 @@ static int audioDecodeFrame(VPVidContext *vidCtx, uint8_t *audioBuf,
     }
 
     for (;;) {
-      int recvRet = avcodec_receive_frame(vidCtx->aCodecCtx, &frame);
+      int recvRet = avcodec_receive_frame(ctx->vidCtx->aCodecCtx, &frame);
       if (recvRet == AVERROR(EAGAIN)) {
         break;
       } else if (recvRet < 0) {
@@ -669,21 +673,21 @@ static int audioDecodeFrame(VPVidContext *vidCtx, uint8_t *audioBuf,
         // Got a frame
 
         int frameBufSize = av_samples_get_buffer_size(
-            NULL, vidCtx->aCodecCtx->channels, frame.nb_samples,
-            vidCtx->aCodecCtx->sample_fmt, 1);
+            NULL, ctx->vidCtx->aCodecCtx->channels, frame.nb_samples,
+            ctx->vidCtx->aCodecCtx->sample_fmt, 1);
         assert(frameBufSize <= audioBufSize);
 
         // planar audio format
         // TODO: add a check using av_sample_fmt_is_planar
-        assert(av_sample_fmt_is_planar(vidCtx->aCodecCtx->sample_fmt));
-        assert(vidCtx->aCodecCtx->channels == 2);
+        assert(av_sample_fmt_is_planar(ctx->vidCtx->aCodecCtx->sample_fmt));
+        assert(ctx->vidCtx->aCodecCtx->channels == 2);
 
         int bsPerSample =
-            av_get_bytes_per_sample(vidCtx->aCodecCtx->sample_fmt);
+            av_get_bytes_per_sample(ctx->vidCtx->aCodecCtx->sample_fmt);
         assert(bsPerSample == 4);
         /* printf("bsPerSample: %d\n", bsPerSample); */
         for (int sIdx = 0; sIdx < frame.nb_samples; sIdx++) {
-          for (int cIdx = 0; cIdx < vidCtx->aCodecCtx->channels; cIdx++) {
+          for (int cIdx = 0; cIdx < ctx->vidCtx->aCodecCtx->channels; cIdx++) {
             memcpy(audioBuf, frame.data[cIdx] + sIdx * bsPerSample,
                    bsPerSample);
             audioBuf += bsPerSample;
@@ -706,14 +710,14 @@ static int audioDecodeFrame(VPVidContext *vidCtx, uint8_t *audioBuf,
 static void audioCallback(void *userdata, Uint8 *stream, int len) {
   // TODO: need to think about the vidCtx->isRunning check
   // we can probably stuck in the queueGet blocking call in the audio thread
-  VPVidContext *vidCtx = (VPVidContext *)userdata;
+  VPContext *ctx = (VPContext *)userdata;
 
   static uint8_t audio_buf[(MAX_AUDIO_FRAME_SIZE * 3) / 2];
   unsigned int audio_buf_size = 0;
 
   while (len > 0) {
     // get frame
-    int audio_dec_ret = audioDecodeFrame(vidCtx, audio_buf, sizeof(audio_buf));
+    int audio_dec_ret = audioDecodeFrame(ctx, audio_buf, sizeof(audio_buf));
     if (audio_dec_ret < 0) {
       audio_buf_size = 1024;
       memset(audio_buf, 0, audio_buf_size);
