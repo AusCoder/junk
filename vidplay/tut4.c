@@ -78,6 +78,7 @@ typedef struct {
 typedef struct {
   VPQueue *videoPacketQueue;
   VPQueue *audioPacketQueue;
+  VPQueue *decodedFrameQueue;
   // TODO: add ring buffer for decoded frames
 } VPCommContext;
 
@@ -86,6 +87,8 @@ typedef struct {
   VPPresContext *presCtx;
   VPCommContext *commCtx;
   int isRunning;
+  SDL_Thread *packetThread;
+  SDL_Thread *videoDecodeThread;
 } VPContext;
 
 int presContextInit(VPPresContext *presCtx,
@@ -363,9 +366,17 @@ int commContextInit(VPCommContext *commCtx) {
   if (commCtx->videoPacketQueue == NULL) {
     return VP_ERR_FATAL;
   }
+  printf("commCtx->videoPacketQueue->size %d\n",
+         commCtx->videoPacketQueue->size);
   commCtx->audioPacketQueue = queueAlloc();
   if (commCtx->audioPacketQueue == NULL) {
     queueFree(commCtx->videoPacketQueue);
+    return VP_ERR_FATAL;
+  }
+  commCtx->decodedFrameQueue = queueAlloc();
+  if (commCtx->decodedFrameQueue == NULL) {
+    queueFree(commCtx->videoPacketQueue);
+    queueFree(commCtx->audioPacketQueue);
     return VP_ERR_FATAL;
   }
   return 0;
@@ -374,6 +385,7 @@ int commContextInit(VPCommContext *commCtx) {
 void commContextClose(VPCommContext *commCtx) {
   queueFree(commCtx->videoPacketQueue);
   queueFree(commCtx->audioPacketQueue);
+  queueFree(commCtx->decodedFrameQueue);
 }
 
 VPContext *contextAllocAndInit(const char *path) {
@@ -404,9 +416,11 @@ VPContext *contextAllocAndInit(const char *path) {
   ctx->presCtx = presCtx;
   ctx->commCtx = commCtx;
   ctx->isRunning = 1;
+  ctx->packetThread = NULL;
+  ctx->videoDecodeThread = NULL;
 
   if (vidContextInit(ctx->vidCtx, path) < 0) {
-    LOG_ERROR("vidContextInit");
+    LOG_ERROR("vidContextInit failed");
     goto contextAlloc_error;
   }
 
@@ -430,6 +444,12 @@ VPContext *contextAllocAndInit(const char *path) {
   if (presContextInit(ctx->presCtx, wantedAudioSpecPtr) < 0) {
     LOG_ERROR("presContextInit");
     vidContextClose(ctx->vidCtx);
+    goto contextAlloc_error;
+  }
+  if (commContextInit(ctx->commCtx) < 0) {
+    LOG_ERROR("commContextInit failed");
+    vidContextClose(ctx->vidCtx);
+    presContextClose(ctx->presCtx);
     goto contextAlloc_error;
   }
   return ctx;
@@ -525,7 +545,7 @@ static int presentFrame(VPVidContext *vidCtx, VPPresContext *presCtx) {
   return 0;
 }
 
-static int packetThreadTarget(VPContext *ctx) {
+static int packetThreadTarget(void *userdata) {
   /* Problem: audio and video frames come interleaved.
      Currently we are decoding video, presenting, waiting and pushing
      audio to a separate queue. This means audio buffering to the queue
@@ -534,11 +554,14 @@ static int packetThreadTarget(VPContext *ctx) {
      Instead, we want to queue both frames and audio and present them
      at the same time.
    */
+  VPContext *ctx = (VPContext *)userdata;
   AVPacket packet;
   for (;;) {
     if (!ctx->isRunning) {
       break;
     }
+    printf("video packet queue size %d\n",
+           ctx->commCtx->videoPacketQueue->size);
 
     if (ctx->commCtx->videoPacketQueue->size > MAX_QUEUE_SIZE ||
         ctx->commCtx->audioPacketQueue->size > MAX_QUEUE_SIZE) {
@@ -559,14 +582,17 @@ static int packetThreadTarget(VPContext *ctx) {
         packet.stream_index == ctx->vidCtx->audioStreamIdx) {
       AVPacket *packetClone = av_packet_clone(&packet);
       if (packetClone == NULL) {
-        LOG_ERROR("av_packet_clone failed\n");
+        LOG_ERROR("av_packet_clone failed");
         return -1;
       }
-      VPQueue *q = packet.stream_index == ctx->vidCtx->videoStreamIdx ?
-        ctx->commCtx->videoPacketQueue :
-        ctx->commCtx->audioPacketQueue;
+      VPQueue *q = packet.stream_index == ctx->vidCtx->videoStreamIdx
+                       ? ctx->commCtx->videoPacketQueue
+                       : ctx->commCtx->audioPacketQueue;
+      if (packet.stream_index == ctx->vidCtx->videoStreamIdx) {
+        printf("Putting packet to videoPacketQueue\n");
+      }
       if (queuePut(q, packetClone) < 0) {
-        LOG_ERROR("queuePut failed\n");
+        LOG_ERROR("queuePut failed");
         av_packet_unref(packetClone);
         return -1;
       }
@@ -576,69 +602,132 @@ static int packetThreadTarget(VPContext *ctx) {
   return 0;
 }
 
-  /* // old */
-  /* SDL_Event event; */
-  /* int frameIdx = 0; */
-  /* while (av_read_frame(vidCtx->formatCtx, &packet) >= 0) { */
-  /*   // Handle events */
-  /*   SDL_PollEvent(&event); */
-  /*   switch (event.type) { */
-  /*   case SDL_QUIT: */
-  /*     vidCtx->isRunning = 0; */
-  /*     av_packet_unref(&packet); */
-  /*     return 0; */
-  /*     break; */
-  /*   default: */
-  /*     break; */
-  /*   } */
+/* // old */
+/* SDL_Event event; */
+/* int frameIdx = 0; */
+/* while (av_read_frame(vidCtx->formatCtx, &packet) >= 0) { */
+/*   // Handle events */
+/*   SDL_PollEvent(&event); */
+/*   switch (event.type) { */
+/*   case SDL_QUIT: */
+/*     vidCtx->isRunning = 0; */
+/*     av_packet_unref(&packet); */
+/*     return 0; */
+/*     break; */
+/*   default: */
+/*     break; */
+/*   } */
 
-  /*   // Check packet from video stream */
-  /*   if (packet.stream_index == vidCtx->videoStreamIdx) { */
-  /*     // Try to send packet for decoding */
-  /*     int sendRet = avcodec_send_packet(vidCtx->vCodecCtx, &packet); */
-  /*     if (sendRet == AVERROR(EAGAIN)) { */
-  /*       // try receiving frames */
-  /*     } else if (sendRet < 0) { */
-  /*       LOG_ERROR("avcodec_send_packet failed\n"); */
-  /*       return -1; */
-  /*     } */
+/*   // Check packet from video stream */
+/*   if (packet.stream_index == vidCtx->videoStreamIdx) { */
+/*     // Try to send packet for decoding */
+/*     int sendRet = avcodec_send_packet(vidCtx->vCodecCtx, &packet); */
+/*     if (sendRet == AVERROR(EAGAIN)) { */
+/*       // try receiving frames */
+/*     } else if (sendRet < 0) { */
+/*       LOG_ERROR("avcodec_send_packet failed\n"); */
+/*       return -1; */
+/*     } */
 
-  /*     // Try to read a frame from decoder */
-  /*     for (;;) { */
-  /*       int recvRet = */
-  /*           avcodec_receive_frame(vidCtx->vCodecCtx, vidCtx->frameDecoded); */
-  /*       if (recvRet == AVERROR(EAGAIN)) { */
-  /*         // Can't receive a frame, need to try to send again */
-  /*         break; */
-  /*       } else if (recvRet < 0) { */
-  /*         LOG_ERROR("avcodec_receive_frame failed\n"); */
-  /*         return -1; */
-  /*       } else { */
-  /*         // Got a frame */
-  /*         frameIdx++; */
-  /*         if (presentFrame(vidCtx, presCtx) < 0) { */
-  /*           return -1; */
-  /*         } */
-  /*       } */
-  /*     } */
-  /*   } else if (packet.stream_index == vidCtx->audioStreamIdx) { */
-  /*     AVPacket *packetClone = av_packet_clone(&packet); */
-  /*     if (packetClone == NULL) { */
-  /*       LOG_ERROR("av_packet_clone failed\n"); */
-  /*       return -1; */
-  /*     } */
-  /*     if (queuePut(vidCtx->audioQueue, (const void *)packetClone) < 0) { */
-  /*       LOG_ERROR("queuePut failed\n"); */
-  /*       return -1; */
-  /*     } */
-  /*   } */
-  /*   av_packet_unref(&packet); */
-  /* } */
-  /* printf("Frames seen %d\n", frameIdx); */
-  /* return 0; */
+/*     // Try to read a frame from decoder */
+/*     for (;;) { */
+/*       int recvRet = */
+/*           avcodec_receive_frame(vidCtx->vCodecCtx, vidCtx->frameDecoded); */
+/*       if (recvRet == AVERROR(EAGAIN)) { */
+/*         // Can't receive a frame, need to try to send again */
+/*         break; */
+/*       } else if (recvRet < 0) { */
+/*         LOG_ERROR("avcodec_receive_frame failed\n"); */
+/*         return -1; */
+/*       } else { */
+/*         // Got a frame */
+/*         frameIdx++; */
+/*         if (presentFrame(vidCtx, presCtx) < 0) { */
+/*           return -1; */
+/*         } */
+/*       } */
+/*     } */
+/*   } else if (packet.stream_index == vidCtx->audioStreamIdx) { */
+/*     AVPacket *packetClone = av_packet_clone(&packet); */
+/*     if (packetClone == NULL) { */
+/*       LOG_ERROR("av_packet_clone failed\n"); */
+/*       return -1; */
+/*     } */
+/*     if (queuePut(vidCtx->audioQueue, (const void *)packetClone) < 0) { */
+/*       LOG_ERROR("queuePut failed\n"); */
+/*       return -1; */
+/*     } */
+/*   } */
+/*   av_packet_unref(&packet); */
+/* } */
+/* printf("Frames seen %d\n", frameIdx); */
+/* return 0; */
 /* } */
 
-static int videoDecodeThreadTarget() {
+static int videoDecodeThreadTarget(void *userdata) {
+  VPContext *ctx = (VPContext *)userdata;
+  AVPacket *packet;
+  AVFrame *frame = av_frame_alloc();
+  if (frame == NULL) {
+    LOG_ERROR("av_frame_alloc failed\n");
+    return -1;
+  }
+  for (;;) {
+    if (!ctx->isRunning) {
+      break;
+    }
+    packet = NULL;
+    if (queueGet(ctx->commCtx->videoPacketQueue, (const void **)&packet, 1, 0) <
+        0) {
+      LOG_ERROR("queueGet failed\n");
+      return -1;
+    }
+    assert(packet != NULL);
+    int sendRet = avcodec_send_packet(ctx->vidCtx->vCodecCtx, packet);
+    if ((sendRet < 0) && (sendRet != AVERROR(EAGAIN))) {
+      LOG_ERROR("avcodec_send_packet failed\n");
+      av_packet_free(&packet);
+      av_frame_free(&frame);
+      return -1;
+    }
+
+    for (;;) {
+      int recvRet = avcodec_receive_frame(ctx->vidCtx->vCodecCtx, frame);
+      // We should definitely be a reference counted frame
+      assert(frame->buf[0] != NULL);
+      if (recvRet != AVERROR(EAGAIN)) {
+        // need to send more packets
+        break;
+      } else if (recvRet < 0) {
+        LOG_ERROR("avcodec_receive_frame failed\n");
+        av_packet_free(&packet);
+        av_frame_free(&frame);
+        return -1;
+      } else {
+        // Received a valid decoded frame
+        AVFrame *clonedFrame = av_frame_clone(frame);
+        if (clonedFrame == NULL) {
+          LOG_ERROR("av_frame_clone failed\n");
+          av_packet_free(&packet);
+          av_frame_free(&frame);
+          return -1;
+        }
+        // TODO: add queue max size
+        if (queuePut(ctx->commCtx->decodedFrameQueue, clonedFrame) < 0) {
+          LOG_ERROR("queuePut failed\n");
+          av_frame_unref(clonedFrame);
+          av_frame_free(&clonedFrame);
+          av_packet_free(&packet);
+          av_frame_free(&frame);
+          return -1;
+        }
+      }
+      av_frame_unref(frame);
+    }
+    av_packet_free(&packet);
+  }
+  av_frame_free(&frame);
+  return 0;
 }
 
 static int audioDecodeFrame(VPContext *ctx, uint8_t *audioBuf,
@@ -650,7 +739,8 @@ static int audioDecodeFrame(VPContext *ctx, uint8_t *audioBuf,
     if (!ctx->isRunning) {
       return -1;
     }
-    if (queueGet(ctx->commCtx->audioPacketQueue, (const void **)&pkt, 1, 0) < 0) {
+    if (queueGet(ctx->commCtx->audioPacketQueue, (const void **)&pkt, 1, 0) <
+        0) {
       LOG_ERROR("queueGet failed\n");
       return -1;
     }
@@ -734,8 +824,35 @@ static void audioCallback(void *userdata, Uint8 *stream, int len) {
 
 int main(int argc, char *argv[]) {
   VPContext *ctx = contextAllocAndInit(argv[1]);
-  if (playVideo(ctx) < 0) {
-    LOG_ERROR("playVideo failed");
+  if (ctx == NULL) {
+    LOG_ERROR("contextAllocAndInit failed\n");
+    return 1;
   }
+  ctx->packetThread = SDL_CreateThread(packetThreadTarget, "packet", ctx);
+  if (ctx->packetThread == NULL) {
+    LOG_SDL_ERROR("SDL_CreateThread failed");
+    contextCloseAndFree(ctx);
+    return 1;
+  }
+  ctx->videoDecodeThread =
+      SDL_CreateThread(videoDecodeThreadTarget, "decode", ctx);
+  if (ctx->videoDecodeThread == NULL) {
+    LOG_SDL_ERROR("SDL_CreateThread failed");
+    contextCloseAndFree(ctx);
+    return 1;
+  }
+
+  SDL_Event event;
+  for (;;) {
+    SDL_WaitEvent(&event);
+    switch (event.type) {
+    case SDL_QUIT:
+      ctx->isRunning = 0;
+      break;
+    default:
+      break;
+    }
+  }
+  // wait a bit for threads, empty queues
   contextCloseAndFree(ctx);
 }
