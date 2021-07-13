@@ -62,7 +62,6 @@ VPQueue *queueAlloc(int maxSize) {
 }
 
 void queueFree(VPQueue *q) {
-  // LOG_INFO("%s", "calling queue free");
   SDL_LockMutex(q->mutex);
   VPQueueItem *i = q->head;
   while (i != NULL) {
@@ -86,9 +85,8 @@ int queuePut(VPQueue *q, const void *value, int shouldBlock, int timeoutMs) {
   }
 
   while ((q->maxSize > 0) && (q->size >= q->maxSize)) {
-    int condRet;
     if (timeoutMs > 0) {
-      condRet = SDL_CondWaitTimeout(q->cond, q->mutex, timeoutMs);
+      int condRet = SDL_CondWaitTimeout(q->cond, q->mutex, timeoutMs);
       if (condRet == SDL_MUTEX_TIMEDOUT) {
         if (SDL_UnlockMutex(q->mutex) < 0) {
           LOG_SDL_ERROR("SDL_UnlockMutex failed");
@@ -96,10 +94,6 @@ int queuePut(VPQueue *q, const void *value, int shouldBlock, int timeoutMs) {
         };
         return VP_ERR_TIMEDOUT;
       } else if (condRet < 0) {
-        // if (SDL_UnlockMutex(q->mutex) < 0) {
-        //   LOG_SDL_ERROR("SDL_UnlockMutex failed");
-        //   return VP_ERR_FATAL;
-        // };
         LOG_SDL_ERROR("SDL_CondWaitTimeout failed");
         return VP_ERR_FATAL;
       }
@@ -108,12 +102,18 @@ int queuePut(VPQueue *q, const void *value, int shouldBlock, int timeoutMs) {
         LOG_SDL_ERROR("SDL_CondWait failed");
         return VP_ERR_FATAL;
       }
+    } else {
+      if (SDL_UnlockMutex(q->mutex) < 0) {
+        LOG_SDL_ERROR("SDL_UnlockMutex failed");
+        return VP_ERR_FATAL;
+      };
+      return VP_ERR_AGAIN;
     }
   }
 
   VPQueueItem *item = malloc(sizeof(VPQueueItem));
   if (item == NULL) {
-    LOG_ERROR("%s", "malloc failed");
+    LOG_ERROR_MSG("malloc failed");
     return VP_ERR_FATAL;
   }
   item->next = NULL;
@@ -144,13 +144,15 @@ int queueGet(VPQueue *q, const void **value, int shouldBlock, int timeoutMs) {
     return VP_ERR_FATAL;
   }
 
-  int ret = 0;
   while (q->head == NULL) {
     if (timeoutMs > 0) {
       int condRet = SDL_CondWaitTimeout(q->cond, q->mutex, timeoutMs);
       if (condRet == SDL_MUTEX_TIMEDOUT) {
-        ret = VP_ERR_TIMEDOUT;
-        break;
+        if (SDL_UnlockMutex(q->mutex) < 0) {
+          LOG_SDL_ERROR("SDL_UnlockMutex failed");
+          return VP_ERR_FATAL;
+        }
+        return VP_ERR_TIMEDOUT;
       } else if (condRet < 0) {
         LOG_SDL_ERROR("SDL_CondWaitTimeout failed");
         return VP_ERR_FATAL;
@@ -160,32 +162,48 @@ int queueGet(VPQueue *q, const void **value, int shouldBlock, int timeoutMs) {
         LOG_SDL_ERROR("SDL_CondWait failed");
         return VP_ERR_FATAL;
       }
+    } else {
+      if (SDL_UnlockMutex(q->mutex) < 0) {
+        LOG_SDL_ERROR("SDL_UnlockMutex failed");
+        return VP_ERR_FATAL;
+      }
+      return VP_ERR_AGAIN;
     }
   }
-  if ((q->head == NULL) && (ret == 0)) {
-    ret = VP_ERR_AGAIN;
+
+  VPQueueItem *item = q->head;
+  q->head = q->head->next;
+  q->size--;
+  if (q->head == NULL) {
+    q->tail = NULL;
   }
-  if (q->head != NULL) {
-    assert(ret == 0);
-    VPQueueItem *item = q->head;
-    q->head = q->head->next;
-    q->size--;
-    if (q->head == NULL) {
-      q->tail = NULL;
-    }
-    *value = item->value;
-    free(item);
-    if (SDL_CondSignal(q->cond) < 0) {
-      LOG_SDL_ERROR("SDL_CondSignal failed");
-      return VP_ERR_FATAL;
-    }
-    ret = 0;
+  *value = item->value;
+  free(item);
+  if (SDL_CondSignal(q->cond) < 0) {
+    LOG_SDL_ERROR("SDL_CondSignal failed");
+    return VP_ERR_FATAL;
   }
+
   if (SDL_UnlockMutex(q->mutex) < 0) {
     LOG_SDL_ERROR("SDL_UnlockMutex failed");
     return VP_ERR_FATAL;
   }
-  return ret;
+  return 0;
+}
+
+static void queueClear(VPQueue *q, void (*freeFn)(void *)) {
+  void *ptr;
+  for (;;) {
+    int getRet = queueGet(q, (const void **)&ptr, VP_FALSE, 0);
+    if (getRet == 0) {
+      freeFn(ptr);
+    } else if (getRet == VP_ERR_AGAIN) {
+      break;
+    } else {
+      LOG_ERROR_FMT("unexpected error dumping queue. status %d", getRet);
+      break;
+    }
+  }
 }
 
 #endif // _QUEUE

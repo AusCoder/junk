@@ -36,6 +36,8 @@
 #define AUDIO_SAMPLE_SIZE 1024
 #define MAX_AUDIO_FRAME_SIZE 192000
 
+#define EVENT_REFRESH 1
+
 static void audioCallback(void *userdata, Uint8 *stream, int len);
 
 // presentation context
@@ -131,10 +133,10 @@ int presContextInit(VPPresContext *presCtx,
   SDL_AudioSpec *receivedAudioSpec = NULL;
   SDL_AudioDeviceID audioDeviceId = 0;
   if (wantedAudioSpec != NULL) {
-    LOG_WARNING("%s", "creating sdl audio");
+    LOG_INFO_MSG("creating sdl audio");
     receivedAudioSpec = (SDL_AudioSpec *)malloc(sizeof(SDL_AudioSpec));
     if (receivedAudioSpec == NULL) {
-      LOG_ERROR("%s", "malloc failed");
+      LOG_ERROR_MSG("malloc failed");
       SDL_DestroyTexture(texture);
       SDL_DestroyRenderer(renderer);
       SDL_DestroyWindow(window);
@@ -142,8 +144,7 @@ int presContextInit(VPPresContext *presCtx,
       return -1;
     }
     audioDeviceId =
-        SDL_OpenAudioDevice(NULL, 0, wantedAudioSpec, receivedAudioSpec,
-                            SDL_AUDIO_ALLOW_FORMAT_CHANGE);
+        SDL_OpenAudioDevice(NULL, 0, wantedAudioSpec, receivedAudioSpec, 0);
     if (audioDeviceId <= 0) {
       LOG_SDL_ERROR("SDL_OpenAudioDevice failed");
       free(receivedAudioSpec);
@@ -152,10 +153,6 @@ int presContextInit(VPPresContext *presCtx,
       SDL_DestroyWindow(window);
       SDL_Quit();
       return -1;
-    }
-    if (wantedAudioSpec->format != receivedAudioSpec->format) {
-      // Something else?
-      LOG_WARNING("%s", "didn't get expected audio format");
     }
     SDL_PauseAudioDevice(audioDeviceId, 0);
   }
@@ -187,16 +184,16 @@ static int vidContextOpenCodecContext(const AVCodecParameters *codecPar,
                                       AVCodecContext **codecCtx) {
   AVCodec *c = avcodec_find_decoder(codecPar->codec_id);
   if (c == NULL) {
-    LOG_ERROR("%s", "Unsupported codec");
+    LOG_ERROR_MSG("Unsupported codec");
     return -1;
   }
   AVCodecContext *cCtx = avcodec_alloc_context3(c);
   if (avcodec_parameters_to_context(cCtx, codecPar) != 0) {
-    LOG_ERROR("%s", "Failed to set codec parameters");
+    LOG_ERROR_MSG("Failed to set codec parameters");
     return -1;
   }
   if (avcodec_open2(cCtx, c, NULL) < 0) {
-    LOG_ERROR("%s", "Failed to open codec context");
+    LOG_ERROR_MSG("Failed to open codec context");
     avcodec_free_context(&cCtx);
     return -1;
   }
@@ -243,7 +240,7 @@ static int vidContextInit(VPVidContext *vidCtx, const char *path) {
   AVCodec *vCodec = NULL;
   AVCodecContext *vCodecCtx = NULL;
   if (vidContextOpenCodecContext(vCodecPar, &vCodec, &vCodecCtx) < 0) {
-    LOG_ERROR("%s", "Failed to create video codec context");
+    LOG_ERROR_MSG("Failed to create video codec context");
     avformat_close_input(&pFormatCtx);
     return -1;
   }
@@ -252,7 +249,7 @@ static int vidContextInit(VPVidContext *vidCtx, const char *path) {
   AVCodec *aCodec = NULL;
   AVCodecContext *aCodecCtx = NULL;
   if (audioStreamIdx < 0) {
-    LOG_WARNING("%s", "no audo stream found");
+    LOG_WARNING_MSG("no audo stream found");
   } else {
     aCodecPar = pFormatCtx->streams[audioStreamIdx]->codecpar;
     if (vidContextOpenCodecContext(aCodecPar, &aCodec, &aCodecCtx) < 0) {
@@ -262,14 +259,14 @@ static int vidContextInit(VPVidContext *vidCtx, const char *path) {
   // Getting frames
   AVFrame *pFrameDecoded = av_frame_alloc();
   if (pFrameDecoded == NULL) {
-    LOG_ERROR("%s", "Failed to alloc frame");
+    LOG_ERROR_MSG("Failed to alloc frame");
     vidContextCloseCodecContext(&vCodecCtx);
     avformat_close_input(&pFormatCtx);
     return -1;
   }
   AVFrame *pFrameYUV = av_frame_alloc();
   if (pFrameYUV == NULL) {
-    LOG_ERROR("%s", "Failed to alloc frame");
+    LOG_ERROR_MSG("Failed to alloc frame");
     av_frame_free(&pFrameDecoded);
     vidContextCloseCodecContext(&vCodecCtx);
     avformat_close_input(&pFormatCtx);
@@ -280,7 +277,7 @@ static int vidContextInit(VPVidContext *vidCtx, const char *path) {
                                           SCREEN_HEIGHT, 1);
   uint8_t *buffer = (uint8_t *)av_malloc(numBytes * sizeof(uint8_t));
   if (buffer == NULL) {
-    LOG_ERROR("%s", "Failed to alloc buffer");
+    LOG_ERROR_MSG("Failed to alloc buffer");
     av_frame_free(&pFrameDecoded);
     av_frame_free(&pFrameYUV);
     vidContextCloseCodecContext(&vCodecCtx);
@@ -290,7 +287,7 @@ static int vidContextInit(VPVidContext *vidCtx, const char *path) {
   if (av_image_fill_arrays(pFrameYUV->data, pFrameYUV->linesize, buffer,
                            AV_PIX_FMT_YUV420P, SCREEN_WIDTH, SCREEN_HEIGHT,
                            1) < 0) {
-    LOG_ERROR("%s", "av_image_fill_arrays failed");
+    LOG_ERROR_MSG("av_image_fill_arrays failed");
     av_free(buffer);
     av_frame_free(&pFrameDecoded);
     av_frame_free(&pFrameYUV);
@@ -303,7 +300,7 @@ static int vidContextInit(VPVidContext *vidCtx, const char *path) {
       vCodecCtx->width, vCodecCtx->height, vCodecCtx->pix_fmt, SCREEN_WIDTH,
       SCREEN_HEIGHT, AV_PIX_FMT_YUV420P, SWS_BILINEAR, NULL, NULL, NULL);
   if (pSwsCtx == NULL) {
-    LOG_ERROR("%s", "sws_getContext failed");
+    LOG_ERROR_MSG("sws_getContext failed");
     av_free(buffer);
     av_frame_free(&pFrameDecoded);
     av_frame_free(&pFrameYUV);
@@ -314,7 +311,7 @@ static int vidContextInit(VPVidContext *vidCtx, const char *path) {
 
   /* VPQueue *q = queueAlloc(); */
   /* if (q == NULL) { */
-  /*   LOG_ERROR("%s","queueAlloc failed"); */
+  /*   LOG_ERROR_MSG(queueAlloc failed"); */
   /*   sws_freeContext(pSwsCtx); */
   /*   av_free(buffer); */
   /*   av_frame_free(&pFrameDecoded); */
@@ -371,7 +368,7 @@ int commContextInit(VPCommContext *commCtx) {
     queueFree(commCtx->videoPacketQueue);
     return VP_ERR_FATAL;
   }
-  commCtx->decodedFrameQueue = queueAlloc(1000);
+  commCtx->decodedFrameQueue = queueAlloc(100);
   if (commCtx->decodedFrameQueue == NULL) {
     queueFree(commCtx->videoPacketQueue);
     queueFree(commCtx->audioPacketQueue);
@@ -389,7 +386,7 @@ void commContextClose(VPCommContext *commCtx) {
 VPContext *contextAllocAndInit(const char *path) {
   // TODO: clean up correctly if init fails
   // is goto to right way to do this?
-  LOG_INFO("%s", "Allocating context");
+  LOG_INFO_MSG("Allocating context");
   VPContext *ctx = NULL;
   VPVidContext *vidCtx = NULL;
   VPPresContext *presCtx = NULL;
@@ -419,7 +416,7 @@ VPContext *contextAllocAndInit(const char *path) {
   ctx->videoDecodeThread = NULL;
 
   if (vidContextInit(ctx->vidCtx, path) < 0) {
-    LOG_ERROR("%s", "vidContextInit failed");
+    LOG_ERROR_MSG("vidContextInit failed");
     goto contextAlloc_error;
   }
 
@@ -441,12 +438,12 @@ VPContext *contextAllocAndInit(const char *path) {
   }
 
   if (presContextInit(ctx->presCtx, wantedAudioSpecPtr) < 0) {
-    LOG_ERROR("%s", "presContextInit");
+    LOG_ERROR_MSG("presContextInit");
     vidContextClose(ctx->vidCtx);
     goto contextAlloc_error;
   }
   if (commContextInit(ctx->commCtx) < 0) {
-    LOG_ERROR("%s", "commContextInit failed");
+    LOG_ERROR_MSG("commContextInit failed");
     vidContextClose(ctx->vidCtx);
     presContextClose(ctx->presCtx);
     goto contextAlloc_error;
@@ -465,8 +462,21 @@ contextAlloc_error:
   return NULL;
 }
 
+static void freePacket(void *ptr) {
+  AVPacket *packet = (AVPacket *)ptr;
+  av_packet_free(&packet);
+}
+
+static void freeFrame(void *ptr) {
+  AVFrame *frame = (AVFrame *)ptr;
+  av_frame_free(&frame);
+}
+
 static void contextCloseAndFree(VPContext *ctx) {
-  LOG_INFO("%s", "Closing context");
+  LOG_INFO_MSG("Closing context");
+  queueClear(ctx->commCtx->audioPacketQueue, freePacket);
+  queueClear(ctx->commCtx->videoPacketQueue, freePacket);
+  queueClear(ctx->commCtx->decodedFrameQueue, freeFrame);
   vidContextClose(ctx->vidCtx);
   presContextClose(ctx->presCtx);
   commContextClose(ctx->commCtx);
@@ -504,47 +514,6 @@ static void contextCloseAndFree(VPContext *ctx) {
 //   return -1;
 // }
 
-static int presentFrame(VPVidContext *vidCtx, VPPresContext *presCtx) {
-  sws_scale(vidCtx->swsCtx, (uint8_t const *const *)vidCtx->frameDecoded->data,
-            vidCtx->frameDecoded->linesize, 0, vidCtx->vCodecCtx->height,
-            vidCtx->frameYUV->data, vidCtx->frameYUV->linesize);
-
-  assert(vidCtx->frameYUV->linesize[0] == SCREEN_WIDTH);
-  assert(SCREEN_WIDTH * SDL_BYTESPERPIXEL(SDL_PIXELFORMAT_IYUV) ==
-         SCREEN_WIDTH);
-
-  // YUV - Y has 1 byte per pixel
-  assert(vidCtx->frameYUV->data[1] ==
-         vidCtx->frameYUV->data[0] + SCREEN_WIDTH * SCREEN_HEIGHT * 1);
-  assert(vidCtx->frameYUV->data[2] ==
-         vidCtx->frameYUV->data[1] + SCREEN_WIDTH * SCREEN_HEIGHT * 1 / 2 / 2);
-
-  // SDL_LockTexture version
-  uint8_t *pixels;
-  int pitch;
-  if (SDL_LockTexture(presCtx->texture, NULL, (void **)&pixels, &pitch) < 0) {
-    LOG_SDL_ERROR("SDL_LockTexture failed");
-    return -1;
-  }
-  for (int plane = 0; plane < 3; plane++) {
-    int widthBytes = (plane == 0 ? SCREEN_WIDTH : SCREEN_WIDTH / 2) *
-                     SDL_BYTESPERPIXEL(SDL_PIXELFORMAT_IYUV);
-    int height = plane == 0 ? SCREEN_HEIGHT : SCREEN_HEIGHT / 2;
-    int avFrameOffset = 0;
-    for (int y = 0; y < height; y++) {
-      memcpy(pixels, vidCtx->frameYUV->data[plane] + avFrameOffset, widthBytes);
-      avFrameOffset += widthBytes;
-      pixels += widthBytes;
-    }
-  }
-  SDL_UnlockTexture(presCtx->texture);
-
-  SDL_RenderCopy(presCtx->renderer, presCtx->texture, NULL, NULL);
-  SDL_RenderPresent(presCtx->renderer);
-  SDL_Delay(100);
-  return 0;
-}
-
 static int packetThreadTarget(void *userdata) {
   /* Problem: audio and video frames come interleaved.
      Currently we are decoding video, presenting, waiting and pushing
@@ -560,48 +529,38 @@ static int packetThreadTarget(void *userdata) {
     if (!ctx->isRunning) {
       break;
     }
-    // printf("video packet queue size %d\n",
-    //        ctx->commCtx->videoPacketQueue->size);
-
-    // if (ctx->commCtx->videoPacketQueue->size > MAX_QUEUE_SIZE ||
-    //     ctx->commCtx->audioPacketQueue->size > MAX_QUEUE_SIZE) {
-    //   SDL_Delay(10);
-    //   continue;
-    // }
 
     if (av_read_frame(ctx->vidCtx->formatCtx, &packet) < 0) {
       if (ctx->vidCtx->formatCtx->pb->error == 0) {
         // No error, wait for user input
-        SDL_Delay(100);
+        SDL_Delay(50);
         continue;
       } else {
-        break;
+        LOG_ERROR_MSG("av_read_frame failed");
+        return VP_ERR_FATAL;
       }
     }
     if (packet.stream_index == ctx->vidCtx->videoStreamIdx ||
         packet.stream_index == ctx->vidCtx->audioStreamIdx) {
       AVPacket *clonedPacket = av_packet_clone(&packet);
       if (clonedPacket == NULL) {
-        LOG_ERROR("%s", "av_packet_clone failed");
+        LOG_ERROR_MSG("av_packet_clone failed");
         return VP_ERR_FATAL;
       }
       VPQueue *q = packet.stream_index == ctx->vidCtx->videoStreamIdx
                        ? ctx->commCtx->videoPacketQueue
                        : ctx->commCtx->audioPacketQueue;
 
-      if (packet.stream_index == ctx->vidCtx->audioStreamIdx) {
-        LOG_INFO("%s", "Putting to audio packet queue");
-      }
-
       for (;;) {
         int ret = queuePut(q, clonedPacket, VP_FALSE, 25);
         if (ret >= 0) {
           break;
         } else if (ret != VP_ERR_TIMEDOUT) {
-          LOG_ERROR("%s", "queuePut failed at packet queue");
+          LOG_ERROR_MSG("queuePut failed at packet queue");
           av_packet_free(&clonedPacket);
           return VP_ERR_FATAL;
         } else if (!ctx->isRunning) {
+          av_packet_free(&clonedPacket);
           break;
         }
       }
@@ -634,7 +593,7 @@ static int packetThreadTarget(void *userdata) {
 /*     if (sendRet == AVERROR(EAGAIN)) { */
 /*       // try receiving frames */
 /*     } else if (sendRet < 0) { */
-/*       LOG_ERROR("%s","avcodec_send_packet failed\n"); */
+/*       LOG_ERROR_MSG(avcodec_send_packet failed\n"); */
 /*       return -1; */
 /*     } */
 
@@ -646,7 +605,7 @@ static int packetThreadTarget(void *userdata) {
 /*         // Can't receive a frame, need to try to send again */
 /*         break; */
 /*       } else if (recvRet < 0) { */
-/*         LOG_ERROR("%s","avcodec_receive_frame failed\n"); */
+/*         LOG_ERROR_MSG(avcodec_receive_frame failed\n"); */
 /*         return -1; */
 /*       } else { */
 /*         // Got a frame */
@@ -659,11 +618,11 @@ static int packetThreadTarget(void *userdata) {
 /*   } else if (packet.stream_index == vidCtx->audioStreamIdx) { */
 /*     AVPacket *packetClone = av_packet_clone(&packet); */
 /*     if (packetClone == NULL) { */
-/*       LOG_ERROR("%s","av_packet_clone failed\n"); */
+/*       LOG_ERROR_MSG(av_packet_clone failed\n"); */
 /*       return -1; */
 /*     } */
 /*     if (queuePut(vidCtx->audioQueue, (const void *)packetClone) < 0) { */
-/*       LOG_ERROR("%s","queuePut failed\n"); */
+/*       LOG_ERROR_MSG(queuePut failed\n"); */
 /*       return -1; */
 /*     } */
 /*   } */
@@ -681,7 +640,7 @@ static int videoDecodeReceiveFrames(VPContext *ctx, AVFrame *frame) {
       // need to send more packets
       break;
     } else if (recvRet < 0) {
-      LOG_ERROR("%s", "avcodec_receive_frame failed");
+      LOG_ERROR_MSG("avcodec_receive_frame failed");
       return VP_ERR_FATAL;
     } else {
       // Received a valid decoded frame
@@ -691,7 +650,7 @@ static int videoDecodeReceiveFrames(VPContext *ctx, AVFrame *frame) {
 
       AVFrame *clonedFrame = av_frame_clone(frame);
       if (clonedFrame == NULL) {
-        LOG_ERROR("%s", "av_frame_clone failed");
+        LOG_ERROR_MSG("av_frame_clone failed");
         av_frame_unref(frame);
         return VP_ERR_FATAL;
       }
@@ -700,11 +659,11 @@ static int videoDecodeReceiveFrames(VPContext *ctx, AVFrame *frame) {
         int putRet = queuePut(ctx->commCtx->decodedFrameQueue, clonedFrame,
                               VP_FALSE, 25);
         if (putRet >= 0) {
-          printf("Put frame to decded queue. Size: %d\n",
-                 ctx->commCtx->decodedFrameQueue->size);
+          // printf("Put frame to decded queue. Size: %d\n",
+          //        ctx->commCtx->decodedFrameQueue->size);
           break;
         } else if (putRet != VP_ERR_TIMEDOUT) {
-          LOG_ERROR("%s", "queuePut failed");
+          LOG_ERROR_MSG("queuePut failed");
           av_frame_free(&clonedFrame);
           av_frame_unref(frame);
           return VP_ERR_FATAL;
@@ -725,7 +684,7 @@ static int videoDecodeThreadTarget(void *userdata) {
   AVPacket *packet;
   AVFrame *frame = av_frame_alloc();
   if (frame == NULL) {
-    LOG_ERROR("%s", "av_frame_alloc failed");
+    LOG_ERROR_MSG("av_frame_alloc failed");
     return VP_ERR_FATAL;
   }
 
@@ -742,7 +701,7 @@ static int videoDecodeThreadTarget(void *userdata) {
       if (getRet >= 0) {
         break;
       } else if (getRet != VP_ERR_TIMEDOUT) {
-        LOG_ERROR("%s", "queueGet failed");
+        LOG_ERROR_MSG("queueGet failed");
         return VP_ERR_FATAL;
       } else if (!ctx->isRunning) {
         shouldBreak = VP_TRUE;
@@ -756,7 +715,7 @@ static int videoDecodeThreadTarget(void *userdata) {
 
     int sendRet = avcodec_send_packet(ctx->vidCtx->vCodecCtx, packet);
     if ((sendRet < 0) && (sendRet != AVERROR(EAGAIN))) {
-      LOG_ERROR("%s", "avcodec_send_packet failed");
+      LOG_ERROR_MSG("avcodec_send_packet failed");
       av_packet_free(&packet);
       av_frame_free(&frame);
       return VP_ERR_FATAL;
@@ -774,107 +733,191 @@ static int videoDecodeThreadTarget(void *userdata) {
   return 0;
 }
 
-static int audioDecodeFrame(VPContext *ctx, uint8_t *audioBuf,
-                            int audioBufSize) {
-  // static AVPacket pkt;
-  AVPacket *pkt;
+static int audioDecodePacket(VPContext *ctx, uint8_t *audioBuf,
+                             int audioBufSize) {
+  AVPacket *packet;
   static AVFrame frame;
+  // get audio packets
   for (;;) {
-    if (!ctx->isRunning) {
-      return -1;
+    int getRet = queueGet(ctx->commCtx->audioPacketQueue,
+                          (const void **)&packet, VP_FALSE, 0);
+    if (getRet >= 0) {
+      break;
+    } else if (getRet != VP_ERR_AGAIN) {
+      LOG_ERROR_MSG("queueGet failed");
+      return VP_ERR_FATAL;
+    } else {
+      // No audio frames available
+      return VP_ERR_AGAIN;
     }
-    assert(ctx->commCtx->audioPacketQueue->mutex != NULL);
-    if (queueGet(ctx->commCtx->audioPacketQueue, (const void **)&pkt, 1, 0) <
-        0) {
-      LOG_ERROR("%s", "queueGet failed");
-      return -1;
-    }
-    LOG_INFO("%s", "Successfully got from audio queue");
-    // AVERROR_EOF
-    int sendRet = avcodec_send_packet(ctx->vidCtx->aCodecCtx, pkt);
-    if ((sendRet < 0) && (sendRet != AVERROR(EAGAIN))) {
-      LOG_ERROR("%s", "avcodec_send_packet failed\n");
-      av_packet_free(&pkt);
-      return -1;
-    }
-
-    for (;;) {
-      int recvRet = avcodec_receive_frame(ctx->vidCtx->aCodecCtx, &frame);
-      if (recvRet == AVERROR(EAGAIN)) {
-        break;
-      } else if (recvRet < 0) {
-        LOG_ERROR("%s", "avcodec_receive_frame failed\n");
-        av_packet_free(&pkt);
-        return -1;
-      } else {
-        // Got a frame
-
-        int frameBufSize = av_samples_get_buffer_size(
-            NULL, ctx->vidCtx->aCodecCtx->channels, frame.nb_samples,
-            ctx->vidCtx->aCodecCtx->sample_fmt, 1);
-        assert(frameBufSize <= audioBufSize);
-
-        // planar audio format
-        // TODO: add a check using av_sample_fmt_is_planar
-        assert(av_sample_fmt_is_planar(ctx->vidCtx->aCodecCtx->sample_fmt));
-        assert(ctx->vidCtx->aCodecCtx->channels == 2);
-
-        int bsPerSample =
-            av_get_bytes_per_sample(ctx->vidCtx->aCodecCtx->sample_fmt);
-        assert(bsPerSample == 4);
-        /* printf("bsPerSample: %d\n", bsPerSample); */
-        for (int sIdx = 0; sIdx < frame.nb_samples; sIdx++) {
-          for (int cIdx = 0; cIdx < ctx->vidCtx->aCodecCtx->channels; cIdx++) {
-            memcpy(audioBuf, frame.data[cIdx] + sIdx * bsPerSample,
-                   bsPerSample);
-            audioBuf += bsPerSample;
-          }
-        }
-
-        // printf("frameBufSize: %d\n", frameBufSize);
-        // memcpy(audioBuf, frame.data[0], frameBufSize);
-        av_packet_free(&pkt);
-        return frameBufSize;
-      }
-    }
-    av_packet_free(&pkt);
   }
+
+  // TODO: do I need to handle AVERROR_EOF?
+  int sendRet = avcodec_send_packet(ctx->vidCtx->aCodecCtx, packet);
+  if ((sendRet < 0) && (sendRet != AVERROR(EAGAIN))) {
+    LOG_ERROR_MSG("avcodec_send_packet failed");
+    av_packet_free(&packet);
+    return VP_ERR_FATAL;
+  }
+
+  int bytesWritten = 0;
+  for (;;) {
+    int recvRet = avcodec_receive_frame(ctx->vidCtx->aCodecCtx, &frame);
+    if (recvRet == AVERROR(EAGAIN)) {
+      break;
+    } else if (recvRet < 0) {
+      LOG_ERROR_MSG("avcodec_receive_frame failed");
+      av_packet_free(&packet);
+      return VP_ERR_FATAL;
+    } else {
+      // Got a frame
+      int frameSize = av_samples_get_buffer_size(
+          NULL, ctx->vidCtx->aCodecCtx->channels, frame.nb_samples,
+          ctx->vidCtx->aCodecCtx->sample_fmt, 1);
+      assert(frameSize <= audioBufSize);
+
+      // planar audio format
+      // TODO: add a check using av_sample_fmt_is_planar
+      assert(av_sample_fmt_is_planar(ctx->vidCtx->aCodecCtx->sample_fmt));
+      assert(ctx->vidCtx->aCodecCtx->channels == 2);
+
+      int bsPerSample =
+          av_get_bytes_per_sample(ctx->vidCtx->aCodecCtx->sample_fmt);
+      assert(bsPerSample == 4);
+      /* printf("bsPerSample: %d\n", bsPerSample); */
+      for (int sIdx = 0; sIdx < frame.nb_samples; sIdx++) {
+        for (int cIdx = 0; cIdx < ctx->vidCtx->aCodecCtx->channels; cIdx++) {
+          memcpy(audioBuf, frame.data[cIdx] + sIdx * bsPerSample, bsPerSample);
+          audioBuf += bsPerSample;
+          audioBufSize -= bsPerSample;
+          bytesWritten += bsPerSample;
+        }
+      }
+      av_frame_unref(&frame);
+    }
+  }
+  av_packet_free(&packet);
+  return bytesWritten;
 }
 
-// typedef void (SDLCALL * SDL_AudioCallback) (void *userdata, Uint8 * stream,
-//                                             int len);
-
 static void audioCallback(void *userdata, Uint8 *stream, int len) {
-  // TODO: need to think about the vidCtx->isRunning check
-  // we can probably stuck in the queueGet blocking call in the audio thread
   VPContext *ctx = (VPContext *)userdata;
 
   static uint8_t audio_buf[(MAX_AUDIO_FRAME_SIZE * 3) / 2];
-  unsigned int audio_buf_size = 0;
+  unsigned int audioBufSize = 0;
 
   while (len > 0) {
-    // get frame
-    int audio_dec_ret = audioDecodeFrame(ctx, audio_buf, sizeof(audio_buf));
-    if (audio_dec_ret < 0) {
-      audio_buf_size = 1024;
-      memset(audio_buf, 0, audio_buf_size);
+    // decode audio frames and write to audioBuf
+    int decRet = audioDecodePacket(ctx, audio_buf, sizeof(audio_buf));
+    if (decRet < 0) {
+      LOG_WARNING_FMT("audioDecodePacket returned %d. filling with silence",
+                      decRet);
+      audioBufSize = 1024;
+      memset(audio_buf, 0, audioBufSize);
     } else {
-      audio_buf_size = audio_dec_ret;
+      audioBufSize = decRet;
     }
-    // copy frame to SDL audio stream buffer
-    int len1 = audio_buf_size <= len ? audio_buf_size : len;
+    // copy decoded audio frames to SDL audio stream buffer
+    int len1 = audioBufSize <= len ? audioBufSize : len;
     memcpy(stream, audio_buf, len1);
     len -= len1;
     stream += len1;
   }
 }
 
+static Uint32 refreshTimerCb(Uint32 interval, void *userdata) {
+  SDL_Event event;
+  event.type = SDL_USEREVENT;
+  event.user.code = EVENT_REFRESH;
+  event.user.data1 = userdata;
+  event.user.data2 = 0;
+  if (SDL_PushEvent(&event) != 1) {
+    LOG_SDL_ERROR("SDL_PushEvent failed");
+  }
+  return 0;
+}
+
+static void scheduleRefresh(VPContext *ctx, int delay) {
+  if (SDL_AddTimer(delay, refreshTimerCb, (void *)ctx) == 0) {
+    LOG_SDL_ERROR("SDL_AddTimer failed");
+  }
+}
+
+static int presentFrame(VPContext *ctx, AVFrame *decodedFrame) {
+  VPVidContext *vidCtx = ctx->vidCtx;
+  VPPresContext *presCtx = ctx->presCtx;
+  sws_scale(vidCtx->swsCtx, (uint8_t const *const *)decodedFrame->data,
+            decodedFrame->linesize, 0, vidCtx->vCodecCtx->height,
+            vidCtx->frameYUV->data, vidCtx->frameYUV->linesize);
+
+  assert(vidCtx->frameYUV->linesize[0] == SCREEN_WIDTH);
+  assert(SCREEN_WIDTH * SDL_BYTESPERPIXEL(SDL_PIXELFORMAT_IYUV) ==
+         SCREEN_WIDTH);
+
+  // YUV - Y has 1 byte per pixel
+  assert(vidCtx->frameYUV->data[1] ==
+         vidCtx->frameYUV->data[0] + SCREEN_WIDTH * SCREEN_HEIGHT * 1);
+  assert(vidCtx->frameYUV->data[2] ==
+         vidCtx->frameYUV->data[1] + SCREEN_WIDTH * SCREEN_HEIGHT * 1 / 2 / 2);
+
+  // SDL_LockTexture version
+  uint8_t *pixels;
+  int pitch;
+  if (SDL_LockTexture(presCtx->texture, NULL, (void **)&pixels, &pitch) < 0) {
+    LOG_SDL_ERROR("SDL_LockTexture failed");
+    return VP_ERR_FATAL;
+  }
+  for (int plane = 0; plane < 3; plane++) {
+    int widthBytes = (plane == 0 ? SCREEN_WIDTH : SCREEN_WIDTH / 2) *
+                     SDL_BYTESPERPIXEL(SDL_PIXELFORMAT_IYUV);
+    int height = plane == 0 ? SCREEN_HEIGHT : SCREEN_HEIGHT / 2;
+    int avFrameOffset = 0;
+    for (int y = 0; y < height; y++) {
+      memcpy(pixels, vidCtx->frameYUV->data[plane] + avFrameOffset, widthBytes);
+      avFrameOffset += widthBytes;
+      pixels += widthBytes;
+    }
+  }
+  SDL_UnlockTexture(presCtx->texture);
+  if (SDL_RenderCopy(presCtx->renderer, presCtx->texture, NULL, NULL) < 0) {
+    LOG_SDL_ERROR("SDL_RenderCopy failed");
+    return VP_ERR_FATAL;
+  }
+  SDL_RenderPresent(presCtx->renderer);
+  return 0;
+}
+
+static void handleRefreshEvent(VPContext *ctx) {
+  AVFrame *frame;
+  for (;;) {
+    int getRet = queueGet(ctx->commCtx->decodedFrameQueue,
+                          (const void **)&frame, VP_FALSE, 0);
+    if (getRet >= 0) {
+      break;
+    } else if (getRet != VP_ERR_AGAIN) {
+      LOG_ERROR_FMT("queueGet failed with error %d", getRet);
+      return;
+    } else {
+      // No frame available, try again soon
+      scheduleRefresh(ctx, 5);
+      return;
+    }
+  }
+  // timing code is needed!
+  scheduleRefresh(ctx, 50);
+  if (presentFrame(ctx, frame) < 0) {
+    LOG_ERROR_MSG("presentFrame failed");
+  }
+  av_frame_free(&frame);
+}
+
 int main(int argc, char *argv[]) {
   VPContext *ctx = contextAllocAndInit(argv[1]);
   if (ctx == NULL) {
-    LOG_ERROR("%s", "contextAllocAndInit failed\n");
+    LOG_ERROR_MSG("contextAllocAndInit failed\n");
     return 1;
   }
+  scheduleRefresh(ctx, 50);
   ctx->packetThread = SDL_CreateThread(packetThreadTarget, "packet", ctx);
   if (ctx->packetThread == NULL) {
     LOG_SDL_ERROR("SDL_CreateThread failed");
@@ -894,8 +937,17 @@ int main(int argc, char *argv[]) {
     SDL_WaitEvent(&event);
     switch (event.type) {
     case SDL_QUIT:
-      // printf("Got a quit\n")
       ctx->isRunning = 0;
+      break;
+    case SDL_USEREVENT:
+      switch (event.user.code) {
+      case EVENT_REFRESH:
+        // present frame
+        handleRefreshEvent(ctx);
+        break;
+      default:
+        break;
+      }
       break;
     default:
       break;
@@ -904,17 +956,17 @@ int main(int argc, char *argv[]) {
   int threadRet = 0;
   SDL_WaitThread(ctx->packetThread, &threadRet);
   if (threadRet < 0) {
-    LOG_ERROR("packetThread had an error. Returned %d", threadRet);
+    LOG_ERROR_FMT("packetThread had an error. Returned %d", threadRet);
     return 1;
   }
-  LOG_INFO("packetThread returned %d", threadRet);
+  LOG_INFO_FMT("packetThread returned %d", threadRet);
   threadRet = 0;
   SDL_WaitThread(ctx->videoDecodeThread, &threadRet);
   if (threadRet < 0) {
-    LOG_ERROR("videoDecodeThread had an error. Returned %d", threadRet);
+    LOG_ERROR_FMT("videoDecodeThread had an error. Returned %d", threadRet);
     return 1;
   }
-  LOG_INFO("videoDecodeThread returned %d", threadRet);
+  LOG_INFO_FMT("videoDecodeThread returned %d", threadRet);
   // empty queues
   contextCloseAndFree(ctx);
 }
