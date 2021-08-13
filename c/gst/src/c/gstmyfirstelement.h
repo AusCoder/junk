@@ -21,6 +21,7 @@
 #define _GST_MYFIRSTELEMENT_H_
 
 #include <gst/base/gstbasetransform.h>
+#include <gst/video/video.h>
 
 G_BEGIN_DECLS
 
@@ -37,10 +38,8 @@ struct _GstMyfirstelement
 {
   GstBaseTransform base_myfirstelement;
 
-  gint inheight;
-  gint inwidth;
-  gint outheight;
-  gint outwidth;
+  GstVideoInfo *ininfo;
+  GstVideoInfo *outinfo;
 };
 
 struct _GstMyfirstelementClass

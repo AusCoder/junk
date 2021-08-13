@@ -1,21 +1,3 @@
-/* GStreamer
- * Copyright (C) 2021 FIXME <fixme@example.com>
- *
- * This library is free software; you can redistribute it and/or
- * modify it under the terms of the GNU Library General Public
- * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
- *
- * This library is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * Library General Public License for more details.
- *
- * You should have received a copy of the GNU Library General Public
- * License along with this library; if not, write to the
- * Free Software Foundation, Inc., 51 Franklin Street, Suite 500,
- * Boston, MA 02110-1335, USA.
- */
 /**
  * SECTION:element-gstmyfirstelement
  *
@@ -48,66 +30,19 @@ GST_DEBUG_CATEGORY_STATIC(gst_myfirstelement_debug_category);
 /*                                             GParamSpec *pspec); */
 /* static void gst_myfirstelement_get_property(GObject *object, guint property_id, */
 /*                                             GValue *value, GParamSpec *pspec); */
-/* static void gst_myfirstelement_dispose(GObject *object); */
-/* static void gst_myfirstelement_finalize(GObject *object); */
 
+static void gst_myfirstelement_finalize(GObject *object);
 static GstCaps *gst_myfirstelement_transform_caps(GstBaseTransform *trans,
                                                   GstPadDirection direction,
                                                   GstCaps *caps,
                                                   GstCaps *filter);
-
-/* static GstCaps *gst_myfirstelement_fixate_caps(GstBaseTransform *trans, */
-/*                                                GstPadDirection direction, */
-/*                                                GstCaps *caps, */
-/*                                                GstCaps *othercaps); */
-/* static gboolean gst_myfirstelement_accept_caps(GstBaseTransform *trans, */
-/*                                                GstPadDirection direction, */
-/*                                                GstCaps *caps); */
 static gboolean gst_myfirstelement_set_caps(GstBaseTransform *trans,
                                             GstCaps *incaps, GstCaps *outcaps);
-/* static gboolean gst_myfirstelement_query(GstBaseTransform *trans, */
-/*                                          GstPadDirection direction, */
-/*                                          GstQuery *query); */
-/* static gboolean gst_myfirstelement_decide_allocation(GstBaseTransform *trans, */
-/*                                                      GstQuery *query); */
-/* static gboolean gst_myfirstelement_filter_meta(GstBaseTransform *trans, */
-/*                                                GstQuery *query, GType api, */
-/*                                                const GstStructure *params); */
-/* static gboolean gst_myfirstelement_propose_allocation(GstBaseTransform *trans, */
-/*                                                       GstQuery *decide_query, */
-/*                                                       GstQuery *query); */
-/* static gboolean gst_myfirstelement_transform_size(GstBaseTransform *trans, */
-/*                                                   GstPadDirection direction, */
-/*                                                   GstCaps *caps, gsize size, */
-/*                                                   GstCaps *othercaps, */
-/*                                                   gsize *othersize); */
 static gboolean gst_myfirstelement_get_unit_size(GstBaseTransform *trans,
                                                  GstCaps *caps, gsize *size);
-/* static gboolean gst_myfirstelement_start(GstBaseTransform *trans); */
-/* static gboolean gst_myfirstelement_stop(GstBaseTransform *trans); */
-/* static gboolean gst_myfirstelement_sink_event(GstBaseTransform *trans, */
-/*                                               GstEvent *event); */
-/* static gboolean gst_myfirstelement_src_event(GstBaseTransform *trans, */
-/*                                              GstEvent *event); */
-
-/* static GstFlowReturn */
-/* gst_myfirstelement_prepare_output_buffer(GstBaseTransform *trans, */
-/*                                          GstBuffer *input, GstBuffer **outbuf); */
-
-/* static gboolean gst_myfirstelement_copy_metadata(GstBaseTransform *trans, */
-/*                                                  GstBuffer *input, */
-/*                                                  GstBuffer *outbuf); */
-/* static gboolean gst_myfirstelement_transform_meta(GstBaseTransform *trans, */
-/*                                                   GstBuffer *outbuf, */
-/*                                                   GstMeta *meta, */
-/*                                                   GstBuffer *inbuf); */
-/* static void gst_myfirstelement_before_transform(GstBaseTransform *trans, */
-/*                                                 GstBuffer *buffer); */
 static GstFlowReturn gst_myfirstelement_transform(GstBaseTransform *trans,
                                                   GstBuffer *inbuf,
                                                   GstBuffer *outbuf);
-/* static GstFlowReturn gst_myfirstelement_transform_ip(GstBaseTransform *trans, */
-/*                                                      GstBuffer *buf); */
 
 enum { PROP_0 };
 
@@ -152,60 +87,22 @@ static void gst_myfirstelement_class_init(GstMyfirstelementClass *klass) {
 
   // gobject_class->set_property = gst_myfirstelement_set_property;
   // gobject_class->get_property = gst_myfirstelement_get_property;
-  // gobject_class->dispose = gst_myfirstelement_dispose;
-  // gobject_class->finalize = gst_myfirstelement_finalize;
+
+  gobject_class->finalize = gst_myfirstelement_finalize;
 
   base_transform_class->transform_caps =
       GST_DEBUG_FUNCPTR(gst_myfirstelement_transform_caps);
-
-  // base_transform_class->fixate_caps =
-  //     GST_DEBUG_FUNCPTR(gst_myfirstelement_fixate_caps);
-  // base_transform_class->accept_caps =
-  //     GST_DEBUG_FUNCPTR(gst_myfirstelement_accept_caps);
   base_transform_class->set_caps =
       GST_DEBUG_FUNCPTR(gst_myfirstelement_set_caps);
-  // base_transform_class->query = GST_DEBUG_FUNCPTR(gst_myfirstelement_query);
-  // base_transform_class->decide_allocation =
-  //     GST_DEBUG_FUNCPTR(gst_myfirstelement_decide_allocation);
-  // base_transform_class->filter_meta =
-  //     GST_DEBUG_FUNCPTR(gst_myfirstelement_filter_meta);
-  // base_transform_class->propose_allocation =
-  //     GST_DEBUG_FUNCPTR(gst_myfirstelement_propose_allocation);
-  // base_transform_class->transform_size =
-  //     GST_DEBUG_FUNCPTR(gst_myfirstelement_transform_size);
-
   base_transform_class->get_unit_size =
       GST_DEBUG_FUNCPTR(gst_myfirstelement_get_unit_size);
-
-  // base_transform_class->start = GST_DEBUG_FUNCPTR(gst_myfirstelement_start);
-  // base_transform_class->stop = GST_DEBUG_FUNCPTR(gst_myfirstelement_stop);
-  // base_transform_class->sink_event =
-  //     GST_DEBUG_FUNCPTR(gst_myfirstelement_sink_event);
-  // base_transform_class->src_event =
-  //     GST_DEBUG_FUNCPTR(gst_myfirstelement_src_event);
-
-  /* base_transform_class->prepare_output_buffer = */
-  /*     GST_DEBUG_FUNCPTR(gst_myfirstelement_prepare_output_buffer); */
-
-  // base_transform_class->copy_metadata =
-  //     GST_DEBUG_FUNCPTR(gst_myfirstelement_copy_metadata);
-  // base_transform_class->transform_meta =
-  //     GST_DEBUG_FUNCPTR(gst_myfirstelement_transform_meta);
-  // base_transform_class->before_transform =
-  //     GST_DEBUG_FUNCPTR(gst_myfirstelement_before_transform);
-
   base_transform_class->transform =
       GST_DEBUG_FUNCPTR(gst_myfirstelement_transform);
-
-  /* base_transform_class->transform_ip = */
-      /* GST_DEBUG_FUNCPTR(gst_myfirstelement_transform_ip); */
 }
 
 static void gst_myfirstelement_init(GstMyfirstelement *myfirstelement) {
-  myfirstelement->inheight = 0;
-  myfirstelement->inwidth = 0;
-  myfirstelement->outheight = 0;
-  myfirstelement->outwidth = 0;
+  myfirstelement->ininfo = gst_video_info_new();
+  myfirstelement->outinfo = gst_video_info_new();
 }
 
 /* void gst_myfirstelement_set_property(GObject *object, guint property_id, */
@@ -234,25 +131,16 @@ static void gst_myfirstelement_init(GstMyfirstelement *myfirstelement) {
 /*   } */
 /* } */
 
-/* void gst_myfirstelement_dispose(GObject *object) { */
-/*   GstMyfirstelement *myfirstelement = GST_MYFIRSTELEMENT(object); */
+void gst_myfirstelement_finalize(GObject *object) {
+  GstMyfirstelement *myfirstelement = GST_MYFIRSTELEMENT(object);
 
-/*   GST_DEBUG_OBJECT(myfirstelement, "dispose"); */
+  GST_DEBUG_OBJECT(myfirstelement, "finalize");
 
-/*   /\* clean up as possible.  may be called multiple times *\/ */
+  gst_video_info_free(myfirstelement->ininfo);
+  gst_video_info_free(myfirstelement->outinfo);
 
-/*   G_OBJECT_CLASS(gst_myfirstelement_parent_class)->dispose(object); */
-/* } */
-
-/* void gst_myfirstelement_finalize(GObject *object) { */
-/*   GstMyfirstelement *myfirstelement = GST_MYFIRSTELEMENT(object); */
-
-/*   GST_DEBUG_OBJECT(myfirstelement, "finalize"); */
-
-/*   /\* clean up object here *\/ */
-
-/*   G_OBJECT_CLASS(gst_myfirstelement_parent_class)->finalize(object); */
-/* } */
+  G_OBJECT_CLASS(gst_myfirstelement_parent_class)->finalize(object);
+}
 
 static GstCaps *gst_myfirstelement_transform_caps(GstBaseTransform *trans,
                                                   GstPadDirection direction,
@@ -308,260 +196,67 @@ static GstCaps *gst_myfirstelement_transform_caps(GstBaseTransform *trans,
   }
 }
 
-/* static GstCaps *gst_myfirstelement_fixate_caps(GstBaseTransform *trans, */
-/*                                                GstPadDirection direction, */
-/*                                                GstCaps *caps, */
-/*                                                GstCaps *othercaps) { */
-/*   GstMyfirstelement *myfirstelement = GST_MYFIRSTELEMENT(trans); */
-
-/*   GST_DEBUG_OBJECT(myfirstelement, "fixate_caps"); */
-
-/*   return NULL; */
-/* } */
-
-/* static gboolean gst_myfirstelement_accept_caps(GstBaseTransform *trans, */
-/*                                                GstPadDirection direction, */
-/*                                                GstCaps *caps) { */
-/*   GstMyfirstelement *myfirstelement = GST_MYFIRSTELEMENT(trans); */
-
-/*   GST_DEBUG_OBJECT(myfirstelement, "accept_caps"); */
-
-/*   return TRUE; */
-/* } */
-
 static gboolean gst_myfirstelement_set_caps(GstBaseTransform *trans,
                                             GstCaps *incaps, GstCaps *outcaps) {
-  GstMyfirstelement *myfirstelement = GST_MYFIRSTELEMENT(trans);
+  GstMyfirstelement *myelem = GST_MYFIRSTELEMENT(trans);
+  GST_DEBUG_OBJECT(myelem, "set_caps");
 
-  GST_DEBUG_OBJECT(myfirstelement, "set_caps");
-
-  GstStructure *instructure = gst_caps_get_structure(incaps, 0);
-  GstStructure *outstructure = gst_caps_get_structure(outcaps, 0);
-  if (gst_structure_get_int(instructure, "height", &myfirstelement->inheight) &&
-      gst_structure_get_int(instructure, "width", &myfirstelement->inwidth) &&
-      gst_structure_get_int(outstructure, "height", &myfirstelement->outheight) &&
-      gst_structure_get_int(outstructure, "width", &myfirstelement->outwidth)) {
+  if (gst_video_info_from_caps(myelem->ininfo, incaps) &&
+      gst_video_info_from_caps(myelem->outinfo, outcaps)) {
     return TRUE;
   }
-  GST_DEBUG_OBJECT(myfirstelement, "couldn't find height and width on caps");
+
+  GST_DEBUG_OBJECT(myelem, "couldn't set video info from caps");
   return FALSE;
 }
-
-/* static gboolean gst_myfirstelement_query(GstBaseTransform *trans, */
-/*                                          GstPadDirection direction, */
-/*                                          GstQuery *query) { */
-/*   GstMyfirstelement *myfirstelement = GST_MYFIRSTELEMENT(trans); */
-
-/*   GST_DEBUG_OBJECT(myfirstelement, "query"); */
-
-/*   return TRUE; */
-/* } */
-
-/* /\* decide allocation query for output buffers *\/ */
-/* static gboolean gst_myfirstelement_decide_allocation(GstBaseTransform *trans, */
-/*                                                      GstQuery *query) { */
-/*   GstMyfirstelement *myfirstelement = GST_MYFIRSTELEMENT(trans); */
-
-/*   GST_DEBUG_OBJECT(myfirstelement, "decide_allocation"); */
-
-/*   return TRUE; */
-/* } */
-
-/* static gboolean gst_myfirstelement_filter_meta(GstBaseTransform *trans, */
-/*                                                GstQuery *query, GType api, */
-/*                                                const GstStructure *params) { */
-/*   GstMyfirstelement *myfirstelement = GST_MYFIRSTELEMENT(trans); */
-
-/*   GST_DEBUG_OBJECT(myfirstelement, "filter_meta"); */
-
-/*   return TRUE; */
-/* } */
-
-/* /\* propose allocation query parameters for input buffers *\/ */
-/* static gboolean gst_myfirstelement_propose_allocation(GstBaseTransform *trans, */
-/*                                                       GstQuery *decide_query, */
-/*                                                       GstQuery *query) { */
-/*   GstMyfirstelement *myfirstelement = GST_MYFIRSTELEMENT(trans); */
-
-/*   GST_DEBUG_OBJECT(myfirstelement, "propose_allocation"); */
-
-/*   return TRUE; */
-/* } */
-
-/* /\* transform size *\/ */
-/* static gboolean gst_myfirstelement_transform_size(GstBaseTransform *trans, */
-/*                                                   GstPadDirection direction, */
-/*                                                   GstCaps *caps, gsize size, */
-/*                                                   GstCaps *othercaps, */
-/*                                                   gsize *othersize) { */
-/*   GstMyfirstelement *myfirstelement = GST_MYFIRSTELEMENT(trans); */
-
-/*   GST_DEBUG_OBJECT(myfirstelement, "transform_size"); */
-
-/*   return TRUE; */
-/* } */
 
 static gboolean gst_myfirstelement_get_unit_size(GstBaseTransform *trans,
                                                  GstCaps *caps, gsize *size) {
   GstMyfirstelement *myfirstelement = GST_MYFIRSTELEMENT(trans);
-
   GST_DEBUG_OBJECT(myfirstelement, "get_unit_size");
-
-  GstStructure *structure = gst_caps_get_structure(caps, 0);
-  gint width, height;
-  if (gst_structure_get_int(structure, "width", &width) &&
-      gst_structure_get_int(structure, "height", &height)) {
-    *size = width * height * 3;
-    return TRUE;
-  }
-
-  // maybe use GST_ELEMENT_ERROR?
-  GST_DEBUG_OBJECT(myfirstelement, "failed to read width, height on caps");
-  return FALSE;
+  *size = GST_VIDEO_INFO_SIZE(myfirstelement->ininfo);
+  return TRUE;
 }
-
-/* /\* states *\/ */
-/* static gboolean gst_myfirstelement_start(GstBaseTransform *trans) { */
-/*   GstMyfirstelement *myfirstelement = GST_MYFIRSTELEMENT(trans); */
-
-/*   GST_DEBUG_OBJECT(myfirstelement, "start"); */
-
-/*   return TRUE; */
-/* } */
-
-/* static gboolean gst_myfirstelement_stop(GstBaseTransform *trans) { */
-/*   GstMyfirstelement *myfirstelement = GST_MYFIRSTELEMENT(trans); */
-
-/*   GST_DEBUG_OBJECT(myfirstelement, "stop"); */
-
-/*   return TRUE; */
-/* } */
-
-/* /\* sink and src pad event handlers *\/ */
-/* static gboolean gst_myfirstelement_sink_event(GstBaseTransform *trans, */
-/*                                               GstEvent *event) { */
-/*   GstMyfirstelement *myfirstelement = GST_MYFIRSTELEMENT(trans); */
-
-/*   GST_DEBUG_OBJECT(myfirstelement, "sink_event"); */
-
-/*   return GST_BASE_TRANSFORM_CLASS(gst_myfirstelement_parent_class) */
-/*       ->sink_event(trans, event); */
-/* } */
-
-/* static gboolean gst_myfirstelement_src_event(GstBaseTransform *trans, */
-/*                                              GstEvent *event) { */
-/*   GstMyfirstelement *myfirstelement = GST_MYFIRSTELEMENT(trans); */
-
-/*   GST_DEBUG_OBJECT(myfirstelement, "src_event"); */
-
-/*   return GST_BASE_TRANSFORM_CLASS(gst_myfirstelement_parent_class) */
-/*       ->src_event(trans, event); */
-/* } */
-
-/* static GstFlowReturn */
-/* gst_myfirstelement_prepare_output_buffer(GstBaseTransform *trans, */
-/*                                          GstBuffer *input, GstBuffer **outbuf) { */
-/*   GstMyfirstelement *myfirstelement = GST_MYFIRSTELEMENT(trans); */
-
-/*   GST_DEBUG_OBJECT(myfirstelement, "prepare_output_buffer"); */
-
-/*   return GST_FLOW_OK; */
-/* } */
-
-/* /\* metadata *\/ */
-/* static gboolean gst_myfirstelement_copy_metadata(GstBaseTransform *trans, */
-/*                                                  GstBuffer *input, */
-/*                                                  GstBuffer *outbuf) { */
-/*   GstMyfirstelement *myfirstelement = GST_MYFIRSTELEMENT(trans); */
-
-/*   GST_DEBUG_OBJECT(myfirstelement, "copy_metadata"); */
-
-/*   return TRUE; */
-/* } */
-
-/* static gboolean gst_myfirstelement_transform_meta(GstBaseTransform *trans, */
-/*                                                   GstBuffer *outbuf, */
-/*                                                   GstMeta *meta, */
-/*                                                   GstBuffer *inbuf) { */
-/*   GstMyfirstelement *myfirstelement = GST_MYFIRSTELEMENT(trans); */
-
-/*   GST_DEBUG_OBJECT(myfirstelement, "transform_meta"); */
-
-/*   return TRUE; */
-/* } */
-
-/* static void gst_myfirstelement_before_transform(GstBaseTransform *trans, */
-/*                                                 GstBuffer *buffer) { */
-/*   GstMyfirstelement *myfirstelement = GST_MYFIRSTELEMENT(trans); */
-
-/*   GST_DEBUG_OBJECT(myfirstelement, "before_transform"); */
-/* } */
 
 /* transform */
 static GstFlowReturn gst_myfirstelement_transform(GstBaseTransform *trans,
                                                   GstBuffer *inbuf,
                                                   GstBuffer *outbuf) {
   GstMyfirstelement *myfirstelement = GST_MYFIRSTELEMENT(trans);
-  GstElement *elem = GST_ELEMENT(trans);
-
-  GstMapInfo inmapinfo, outmapinfo;
-
   GST_DEBUG_OBJECT(myfirstelement, "transform");
-  if (!gst_buffer_map(inbuf, &inmapinfo, GST_MAP_READ))
+
+  GstVideoFrame inframe, outframe;
+  if (!gst_video_frame_map(&inframe, myfirstelement->ininfo, inbuf, GST_MAP_READ))
     goto mapfail;
-  if (!gst_buffer_map(outbuf, &outmapinfo, GST_MAP_WRITE)) {
-    gst_buffer_unmap(inbuf, &inmapinfo);
+  if (!gst_video_frame_map(&outframe, myfirstelement->outinfo, outbuf, GST_MAP_WRITE)) {
+    gst_video_frame_unmap(&inframe);
     goto mapfail;
   }
 
-  GstPad *sinkpad = GST_PAD(g_list_nth_data(elem->sinkpads, 0));
-  GstCaps *caps = gst_pad_get_current_caps(sinkpad);
-  g_print("my current sink caps %s\n", gst_caps_to_string(caps));
-  gst_caps_unref(caps);
+  guint8 *indata = GST_VIDEO_FRAME_PLANE_DATA(&inframe, 0);
+  guint instride = GST_VIDEO_FRAME_PLANE_STRIDE(&inframe, 0);
+  guint inpixstride = GST_VIDEO_FRAME_COMP_PSTRIDE(&inframe, 0);
+  guint8 *outdata = GST_VIDEO_FRAME_PLANE_DATA(&outframe, 0);
+  guint outstride = GST_VIDEO_FRAME_PLANE_STRIDE(&outframe, 0);
 
-  /* memset(outmapinfo.data, 128, outmapinfo.size); */
-  /* memcpy(outmapinfo.data, inmapinfo.data, outmapinfo.size); */
-
-  // Q: How do I know the current height and width of my caps here?
-  // A: use the set_caps method!
-
-  // All sorts of pointer overruns here
-
-  // if inh > inw
-
-  gpointer outptr, inptr;
-  outptr = outmapinfo.data;
-  inptr = inmapinfo.data + (myfirstelement->inheight / 2) * myfirstelement->inwidth * 3 + (myfirstelement->inwidth / 2) * 3;
-  if ((myfirstelement->inheight > 0) && (myfirstelement->inwidth > 0)) {
-    for (guint idx = 0; idx < myfirstelement->outheight; idx++) {
-      memcpy(outptr, inptr, myfirstelement->outwidth * 3);
-      outptr += myfirstelement->outwidth * 3;
-      inptr += myfirstelement->inwidth * 3;
+  for(guint h = 0; h < MIN(GST_VIDEO_FRAME_HEIGHT(&inframe),
+                           GST_VIDEO_FRAME_HEIGHT(&outframe)); h++) {
+    for (guint w = 0; w < MIN(GST_VIDEO_FRAME_WIDTH(&inframe),
+                              GST_VIDEO_FRAME_WIDTH(&outframe));w++) {
+      guint8 *inpix = indata + h * instride + w * inpixstride;
+      guint8 *outpix = outdata + h * outstride + w * inpixstride;
+      memcpy(outpix, inpix, inpixstride);
     }
-  } else {
-    GST_WARNING_OBJECT(trans, "height width not set");
   }
 
-  gst_buffer_unmap(inbuf, &inmapinfo);
-  gst_buffer_unmap(outbuf, &outmapinfo);
+  gst_video_frame_unmap(&inframe);
+  gst_video_frame_unmap(&outframe);
   return GST_FLOW_OK;
 
  mapfail:
   GST_WARNING_OBJECT(trans, "failed to map buffers");
   return GST_FLOW_OK;
 }
-
-/* static GstFlowReturn gst_myfirstelement_transform_ip(GstBaseTransform *trans, */
-/*                                                      GstBuffer *buf) { */
-/*   GstMyfirstelement *myfirstelement = GST_MYFIRSTELEMENT(trans); */
-
-/*   // g_strdup_printf("some value"); */
-/*   // g_log("some message\n"); */
-
-/*   GST_DEBUG_OBJECT(myfirstelement, "transform_ip"); */
-
-/*   return GST_FLOW_OK; */
-/* } */
 
 static gboolean plugin_init(GstPlugin *plugin) {
 
