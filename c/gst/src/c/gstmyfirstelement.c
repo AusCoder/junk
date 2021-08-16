@@ -216,7 +216,6 @@ static gboolean gst_myfirstelement_set_caps(GstBaseTransform *trans,
 
 static gboolean gst_myfirstelement_get_unit_size(GstBaseTransform *trans,
                                                  GstCaps *caps, gsize *size) {
-  // TODO: check this
   GstMyfirstelement *myfirstelement = GST_MYFIRSTELEMENT(trans);
   GST_DEBUG_OBJECT(myfirstelement, "get_unit_size");
   GstVideoInfo *info = gst_video_info_new();
@@ -226,7 +225,6 @@ static gboolean gst_myfirstelement_get_unit_size(GstBaseTransform *trans,
     ret = TRUE;
   }
   gst_video_info_free(info);
-  GST_WARNING_OBJECT(myfirstelement, "got size");
   return ret;
 }
 
