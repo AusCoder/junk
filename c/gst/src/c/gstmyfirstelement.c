@@ -25,11 +25,14 @@ GST_DEBUG_CATEGORY_STATIC(gst_myfirstelement_debug_category);
 
 /* prototypes */
 
-/* static void gst_myfirstelement_set_property(GObject *object, guint property_id, */
+/* static void gst_myfirstelement_set_property(GObject *object, guint
+ * property_id, */
 /*                                             const GValue *value, */
 /*                                             GParamSpec *pspec); */
-/* static void gst_myfirstelement_get_property(GObject *object, guint property_id, */
-/*                                             GValue *value, GParamSpec *pspec); */
+/* static void gst_myfirstelement_get_property(GObject *object, guint
+ * property_id, */
+/*                                             GValue *value, GParamSpec
+ * *pspec); */
 
 static void gst_myfirstelement_finalize(GObject *object);
 static GstCaps *gst_myfirstelement_transform_caps(GstBaseTransform *trans,
@@ -51,15 +54,15 @@ enum { PROP_0 };
 static GstStaticPadTemplate gst_myfirstelement_src_template =
     GST_STATIC_PAD_TEMPLATE(
         "src", GST_PAD_SRC, GST_PAD_ALWAYS,
-        GST_STATIC_CAPS(
-            "video/x-raw"
-            ",format=RGB,height=100,width=100"));
+        GST_STATIC_CAPS("video/x-raw"
+                        ",format=RGB,height=100,width=100"));
 
 static GstStaticPadTemplate gst_myfirstelement_sink_template =
     GST_STATIC_PAD_TEMPLATE(
         "sink", GST_PAD_SINK, GST_PAD_ALWAYS,
-        GST_STATIC_CAPS("video/x-raw"
-                        ",format=RGB,height=[1,2147483647],width=[1,2147483647]"));
+        GST_STATIC_CAPS(
+            "video/x-raw"
+            ",format=RGB,height=[1,2147483647],width=[1,2147483647]"));
 
 /* class initialization */
 
@@ -106,7 +109,8 @@ static void gst_myfirstelement_init(GstMyfirstelement *myfirstelement) {
 }
 
 /* void gst_myfirstelement_set_property(GObject *object, guint property_id, */
-/*                                      const GValue *value, GParamSpec *pspec) { */
+/*                                      const GValue *value, GParamSpec *pspec)
+ * { */
 /*   GstMyfirstelement *myfirstelement = GST_MYFIRSTELEMENT(object); */
 
 /*   GST_DEBUG_OBJECT(myfirstelement, "set_property"); */
@@ -212,10 +216,18 @@ static gboolean gst_myfirstelement_set_caps(GstBaseTransform *trans,
 
 static gboolean gst_myfirstelement_get_unit_size(GstBaseTransform *trans,
                                                  GstCaps *caps, gsize *size) {
+  // TODO: check this
   GstMyfirstelement *myfirstelement = GST_MYFIRSTELEMENT(trans);
   GST_DEBUG_OBJECT(myfirstelement, "get_unit_size");
-  *size = GST_VIDEO_INFO_SIZE(myfirstelement->ininfo);
-  return TRUE;
+  GstVideoInfo *info = gst_video_info_new();
+  gboolean ret = FALSE;
+  if (gst_video_info_from_caps(info, caps)) {
+    *size = GST_VIDEO_INFO_SIZE(info);
+    ret = TRUE;
+  }
+  gst_video_info_free(info);
+  GST_WARNING_OBJECT(myfirstelement, "got size");
+  return ret;
 }
 
 /* transform */
@@ -226,9 +238,11 @@ static GstFlowReturn gst_myfirstelement_transform(GstBaseTransform *trans,
   GST_DEBUG_OBJECT(myfirstelement, "transform");
 
   GstVideoFrame inframe, outframe;
-  if (!gst_video_frame_map(&inframe, myfirstelement->ininfo, inbuf, GST_MAP_READ))
+  if (!gst_video_frame_map(&inframe, myfirstelement->ininfo, inbuf,
+                           GST_MAP_READ))
     goto mapfail;
-  if (!gst_video_frame_map(&outframe, myfirstelement->outinfo, outbuf, GST_MAP_WRITE)) {
+  if (!gst_video_frame_map(&outframe, myfirstelement->outinfo, outbuf,
+                           GST_MAP_WRITE)) {
     gst_video_frame_unmap(&inframe);
     goto mapfail;
   }
@@ -239,10 +253,12 @@ static GstFlowReturn gst_myfirstelement_transform(GstBaseTransform *trans,
   guint8 *outdata = GST_VIDEO_FRAME_PLANE_DATA(&outframe, 0);
   guint outstride = GST_VIDEO_FRAME_PLANE_STRIDE(&outframe, 0);
 
-  for(guint h = 0; h < MIN(GST_VIDEO_FRAME_HEIGHT(&inframe),
-                           GST_VIDEO_FRAME_HEIGHT(&outframe)); h++) {
+  for (guint h = 0; h < MIN(GST_VIDEO_FRAME_HEIGHT(&inframe),
+                            GST_VIDEO_FRAME_HEIGHT(&outframe));
+       h++) {
     for (guint w = 0; w < MIN(GST_VIDEO_FRAME_WIDTH(&inframe),
-                              GST_VIDEO_FRAME_WIDTH(&outframe));w++) {
+                              GST_VIDEO_FRAME_WIDTH(&outframe));
+         w++) {
       guint8 *inpix = indata + h * instride + w * inpixstride;
       guint8 *outpix = outdata + h * outstride + w * inpixstride;
       memcpy(outpix, inpix, inpixstride);
@@ -253,7 +269,7 @@ static GstFlowReturn gst_myfirstelement_transform(GstBaseTransform *trans,
   gst_video_frame_unmap(&outframe);
   return GST_FLOW_OK;
 
- mapfail:
+mapfail:
   GST_WARNING_OBJECT(trans, "failed to map buffers");
   return GST_FLOW_OK;
 }
