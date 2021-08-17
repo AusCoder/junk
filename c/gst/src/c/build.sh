@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -eu
 
-FILEPREFIX=gstcustomelem
+FILEPREFIX=gstcustomgl
+
+echo "Compiling $FILEPREFIX"
 
 gcc -g -Wall -fPIC \
     $(pkg-config --cflags gstreamer-1.0 gstreamer-base-1.0 gstreamer-video-1.0) \
