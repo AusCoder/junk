@@ -23,13 +23,11 @@ struct _GstCustomgl
   GstPad *srcpad;
   GstPad *sinkpad;
 
-  GstCaps *outcaps;
   GstVideoInfo *ininfo;
-  GstVideoInfo *outinfo;
 
   GstGLDisplay *display;
   GstGLContext *context;
-  GstGLContext *other_context;
+  GstGLContext *other_context;  // application provided gl context
   GRecMutex mutex;
 };
 

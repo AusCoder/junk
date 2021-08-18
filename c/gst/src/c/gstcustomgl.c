@@ -30,7 +30,7 @@ static gboolean gst_customgl_src_query(GstPad *pad, GstObject *parent, GstQuery 
 static void gst_customgl_set_context(GstElement *element, GstContext *context);
 static GstStateChangeReturn gst_customgl_change_state(GstElement *element, GstStateChange transition);
 
-static gboolean gst_customgl_find_bufferpool(GstCustomgl *customgl, GstCaps *outcaps);
+/* static gboolean gst_customgl_find_bufferpool(GstCustomgl *customgl, GstCaps *outcaps); */
 
 enum { PROP_0 };
 
@@ -39,8 +39,7 @@ enum { PROP_0 };
 static GstStaticPadTemplate gst_customgl_src_template =
     GST_STATIC_PAD_TEMPLATE(
         "src", GST_PAD_SRC, GST_PAD_ALWAYS,
-        GST_STATIC_CAPS("video/x-raw(memory:GLMemory)"
-                        ",format=RGBA,height=100,width=100,texture-target=2D"));
+        GST_STATIC_CAPS("text"));
 
 static GstStaticPadTemplate gst_customgl_sink_template =
     GST_STATIC_PAD_TEMPLATE(
@@ -89,15 +88,7 @@ static void gst_customgl_init(GstCustomgl *customgl) {
   gst_pad_set_query_function(customgl->sinkpad, gst_customgl_sink_query);
   gst_pad_set_query_function(customgl->srcpad, gst_customgl_src_query);
 
-  customgl->outcaps = gst_static_caps_get(&gst_customgl_src_template.static_caps);
   customgl->ininfo = gst_video_info_new();
-  if (!gst_caps_is_fixed(customgl->outcaps)) {
-    GST_ERROR_OBJECT(customgl, "src caps not fixed!");
-  }
-  customgl->outinfo = gst_video_info_new();
-  if (!gst_video_info_from_caps(customgl->outinfo, customgl->outcaps)) {
-    GST_WARNING_OBJECT(customgl, "couldn't read video info from src caps");
-  }
 
   customgl->display = NULL;
   customgl->context = NULL;
@@ -137,8 +128,6 @@ void gst_customgl_finalize(GObject *object) {
   GST_DEBUG_OBJECT(customgl, "finalize");
 
   gst_video_info_free(customgl->ininfo);
-  gst_video_info_free(customgl->outinfo);
-  gst_caps_unref(customgl->outcaps);
   g_rec_mutex_clear(&customgl->mutex);
 
   G_OBJECT_CLASS(gst_customgl_parent_class)->finalize(object);
@@ -170,6 +159,22 @@ static void gst_customgl_set_context(GstElement *element, GstContext *context) {
   GST_ELEMENT_CLASS (gst_customgl_parent_class)->set_context (element, context);
 }
 
+static gboolean _ensure_gl_context(GstCustomgl *customgl) {
+  GstGLContext *context = NULL;
+  gboolean ret =
+      gst_gl_query_local_gl_context (GST_ELEMENT (customgl), GST_PAD_SRC,
+      &context);
+  g_rec_mutex_lock(&customgl->mutex);
+  if (ret) {
+    GST_DEBUG_OBJECT(customgl, "local gl context query gave context %" GST_PTR_FORMAT, context);
+    if (customgl->display == context->display) {
+      customgl->context = context;
+    }
+  }
+  g_rec_mutex_unlock(&customgl->mutex);
+  return TRUE;
+}
+
 static GstStateChangeReturn gst_customgl_change_state(GstElement *element, GstStateChange transition) {
   GstCustomgl *customgl = GST_CUSTOMGL(element);
   GstStateChangeReturn ret = GST_STATE_CHANGE_SUCCESS;
@@ -185,6 +190,8 @@ static GstStateChangeReturn gst_customgl_change_state(GstElement *element, GstSt
     if (!gst_gl_ensure_element_data (customgl, &customgl->display,
               &customgl->other_context))
         return GST_STATE_CHANGE_FAILURE;
+    // This needs to do more I think, like create the context or query upstream
+    _ensure_gl_context(customgl);
     break;
   default:
     break;
@@ -208,8 +215,20 @@ static GstStateChangeReturn gst_customgl_change_state(GstElement *element, GstSt
 
 static GstFlowReturn gst_customgl_chain(GstPad *pad, GstObject *parent, GstBuffer *buffer) {
   GstCustomgl *customgl = GST_CUSTOMGL(parent);
-  GST_DEBUG_OBJECT(customgl, "passthrough buffer %" GST_PTR_FORMAT, buffer);
-  return gst_pad_push(customgl->srcpad, buffer);
+  gst_buffer_unref(buffer);
+
+  // call add_thread somewhere here
+
+  GstBuffer *outbuf = gst_buffer_new_allocate(NULL, 10, NULL);
+  GstMapInfo outmapinfo;
+  if (!gst_buffer_map(outbuf, &outmapinfo, GST_MAP_WRITE)) {
+    GST_DEBUG_OBJECT(customgl, "failed to map out buffer");
+    gst_buffer_unref(outbuf);
+    return GST_FLOW_ERROR;
+  }
+  memcpy(outmapinfo.data, "yoyoyo", 6);
+  gst_buffer_unmap(outbuf, &outmapinfo);
+  return gst_pad_push(customgl->srcpad, outbuf);
 }
 
 static gboolean gst_customgl_sink_event(GstPad *pad, GstObject *parent, GstEvent *event) {
@@ -227,11 +246,11 @@ static gboolean gst_customgl_sink_event(GstPad *pad, GstObject *parent, GstEvent
     }
     gst_event_unref(event);
 
-    gst_customgl_find_bufferpool(customgl, customgl->outcaps);
-
-    GstEvent *newevent = gst_event_new_caps(customgl->outcaps);
+    GstCaps *outcaps = gst_static_caps_get(&gst_customgl_src_template.static_caps);
+    GstEvent *newevent = gst_event_new_caps(outcaps);
     GST_DEBUG_OBJECT(customgl, "pushing event %" GST_PTR_FORMAT, newevent);
     ret = gst_pad_push_event(customgl->srcpad, newevent);
+    gst_caps_unref(outcaps);
     break;
   default:
     ret = gst_pad_event_default(pad, parent, event);
@@ -247,41 +266,56 @@ static gboolean gst_customgl_src_event(GstPad *pad, GstObject *parent, GstEvent 
   return gst_pad_event_default(pad, parent, event);
 }
 
-static gboolean _ensure_gl_context(GstCustomgl *customgl) {
-  GstGLContext *context = NULL;
-  gboolean ret =
-      gst_gl_query_local_gl_context (GST_ELEMENT (customgl), GST_PAD_SRC,
-      &context);
-  g_rec_mutex_lock(&customgl->mutex);
-  if (ret) {
-    GST_DEBUG_OBJECT(customgl, "local gl context query gave context %" GST_PTR_FORMAT, context);
-    if (customgl->display == context->display) {
-      customgl->context = context;
-    }
-  }
-  g_rec_mutex_unlock(&customgl->mutex);
-  return TRUE;
-}
+/* static gboolean gst_customgl_find_bufferpool(GstCustomgl *customgl, GstCaps *outcaps) { */
+/*   _ensure_gl_context(customgl); */
 
-static gboolean gst_customgl_find_bufferpool(GstCustomgl *customgl, GstCaps *outcaps) {
-  _ensure_gl_context(customgl);
-
-  GstQuery *query = gst_query_new_allocation(outcaps, TRUE);
-  if (!gst_pad_peer_query(customgl->srcpad, query)) {
-    GST_DEBUG_OBJECT(customgl, "allocation query failed");
-  } else {
-    // Question: is query an inout param in get_pad_peer_query?
-    GST_DEBUG_OBJECT(customgl, "got query response %" GST_PTR_FORMAT, query);
-  }
-  gst_query_unref(query);
-  return TRUE;
-}
+/*   GstQuery *query = gst_query_new_allocation(outcaps, TRUE); */
+/*   if (!gst_pad_peer_query(customgl->srcpad, query)) { */
+/*     GST_DEBUG_OBJECT(customgl, "allocation query failed"); */
+/*   } else { */
+/*     // Question: is query an inout param in get_pad_peer_query? */
+/*     GST_DEBUG_OBJECT(customgl, "got query response %" GST_PTR_FORMAT, query); */
+/*   } */
+/*   gst_query_unref(query); */
+/*   return TRUE; */
+/* } */
 
 // TODO: we might need to handle context queries here using
 static gboolean gst_customgl_sink_query(GstPad *pad, GstObject *parent, GstQuery *query) {
   GstCustomgl *customgl = GST_CUSTOMGL(parent);
+  gboolean ret = FALSE;
   GST_DEBUG_OBJECT(customgl, "received query on sinkpad %" GST_PTR_FORMAT, query);
-  return gst_pad_query_default(pad, parent, query);
+
+  switch (GST_QUERY_TYPE(query)) {
+  case GST_QUERY_CONTEXT:
+    GstGLDisplay *display = NULL;
+    GstGLContext *context = NULL;
+    GstGLContext *other_context = NULL;
+
+    g_rec_mutex_lock(&customgl->mutex);
+    if (customgl->display)
+      display = gst_object_ref(customgl->display);
+    if (customgl->context)
+      context = gst_object_ref(customgl->context);
+    if (customgl->other_context)
+      other_context = gst_object_ref(customgl->other_context);
+    g_rec_mutex_unlock(&customgl->mutex);
+
+    ret = gst_gl_handle_context_query(GST_ELEMENT_CAST(customgl), query, display, context, other_context);
+
+    if (display)
+      gst_object_unref(display);
+    if (context)
+      gst_object_unref(context);
+    if (other_context)
+      gst_object_unref(other_context);
+
+    break;
+  default:
+    ret = gst_pad_query_default(pad, parent, query);
+    break;
+  }
+  return ret;
 }
 
 static gboolean gst_customgl_src_query(GstPad *pad, GstObject *parent, GstQuery *query) {
