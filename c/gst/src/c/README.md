@@ -25,6 +25,7 @@ and `get_unit_size`, new output buffers will be allocated of
 ### Reference
 [Glib api docs](https://docs.gtk.org/glib/index.html)
 [GObject api docs](https://docs.gtk.org/gobject/)
+[Glib debugging tips](https://www.geany.org/manual/gtk/glib/glib-running.html)
 ### Debugging
 Set to kill the program on a warning or higher message `G_DEBUG=fatal_warnings`
 
