@@ -42,3 +42,10 @@ like:
 GST_CAT_INFO_OBJECT (GST_CAT_CONTEXT, element,
     "found context (%p) in downstream query", ctxt)
 ```
+
+## CUDA
+### cudaChannelFormatDesc
+x,y,z,w fields are bits per channel
+### Resources
+[Some color conversion kernels](https://github.com/dusty-nv/jetson-utils/blob/master/cuda/cudaRGB.cu)
+[Opencv docs](https://docs.opencv.org/4.5.2/index.html)

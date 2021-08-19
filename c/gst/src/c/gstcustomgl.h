@@ -29,6 +29,8 @@ struct _GstCustomgl
   GstGLContext *context;
   GstGLContext *other_context;  // application provided gl context
   GRecMutex mutex;
+
+  GstBuffer *inbuffer;
 };
 
 struct _GstCustomglClass

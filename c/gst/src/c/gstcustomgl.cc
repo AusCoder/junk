@@ -6,6 +6,13 @@
 #include <gst/gst.h>
 #include <gst/gl/gl.h>
 
+#include <cuda_runtime.h>
+#include <cuda_gl_interop.h>
+
+#include <opencv2/core.hpp>
+#include <opencv2/imgcodecs.hpp>
+#include <opencv2/imgproc.hpp>
+
 GST_DEBUG_CATEGORY_STATIC(gst_customgl_debug_category);
 #define GST_CAT_DEFAULT gst_customgl_debug_category
 
@@ -93,6 +100,8 @@ static void gst_customgl_init(GstCustomgl *customgl) {
   customgl->display = NULL;
   customgl->context = NULL;
   g_rec_mutex_init(&customgl->mutex);
+
+  customgl->inbuffer = NULL;
 }
 
 /* void gst_customgl_set_property(GObject *object, guint property_id, */
@@ -159,20 +168,74 @@ static void gst_customgl_set_context(GstElement *element, GstContext *context) {
   GST_ELEMENT_CLASS (gst_customgl_parent_class)->set_context (element, context);
 }
 
+/*
+  Flow here needs to be something like:
+  - If we have a context, we are fine
+  - Query downstream for a local gl context using gst_gl_query_local_gl_context
+  - Query upstream using gst_gl_query_local_gl_context
+  - Create a new context using my display
+ */
 static gboolean _ensure_gl_context(GstCustomgl *customgl) {
   GstGLContext *context = NULL;
+  GError *error=NULL;
+
+  // Search downstream
   gboolean ret =
       gst_gl_query_local_gl_context (GST_ELEMENT (customgl), GST_PAD_SRC,
       &context);
   g_rec_mutex_lock(&customgl->mutex);
   if (ret) {
-    GST_DEBUG_OBJECT(customgl, "local gl context query gave context %" GST_PTR_FORMAT, context);
+    GST_DEBUG_OBJECT(customgl, "local gl context query downstream gave context %" GST_PTR_FORMAT, context);
     if (customgl->display == context->display) {
       customgl->context = context;
+      g_rec_mutex_unlock(&customgl->mutex);
+      return TRUE;
     }
+    gst_clear_object(&context);
   }
   g_rec_mutex_unlock(&customgl->mutex);
+
+  // Search upstream
+  ret = gst_gl_query_local_gl_context(GST_ELEMENT(customgl), GST_PAD_SINK, &context);
+  g_rec_mutex_lock(&customgl->mutex);
+  if (ret) {
+    GST_DEBUG_OBJECT(customgl, "local gl context query upstream gave context %" GST_PTR_FORMAT, context);
+    if (customgl->display == context->display) {
+      customgl->context = context;
+      g_rec_mutex_unlock(&customgl->mutex);
+      return TRUE;
+    }
+    gst_clear_object(&context);
+  }
+
+  // Create a new one
+  if (!customgl->context) {
+    GST_DEBUG_OBJECT(customgl, "couldn't find local gl context with queries, creating a new one");
+    GST_OBJECT_LOCK(customgl->display);
+    // Try to get context from display
+    do {
+      if (customgl->context)
+        gst_object_unref(customgl->context);
+
+      customgl->context = gst_gl_display_get_gl_context_for_thread(customgl->display, NULL);
+      if (!customgl->context) {
+        if (!gst_gl_display_create_context(customgl->display, customgl->other_context, &customgl->context, &error)) {
+          GST_OBJECT_UNLOCK(customgl->display);
+          goto context_error;
+        }
+      }
+    } while (!gst_gl_display_add_context(customgl->display, customgl->context));
+    GST_OBJECT_UNLOCK(customgl->display);
+  }
+  g_rec_mutex_unlock(&customgl->mutex);
+
   return TRUE;
+
+ context_error:
+  GST_ELEMENT_ERROR (customgl, RESOURCE, NOT_FOUND, ("%s", error->message),
+                     (NULL));
+  g_clear_error(&error);
+  return FALSE;
 }
 
 static GstStateChangeReturn gst_customgl_change_state(GstElement *element, GstStateChange transition) {
@@ -186,12 +249,14 @@ static GstStateChangeReturn gst_customgl_change_state(GstElement *element, GstSt
 
   switch (transition) {
   case GST_STATE_CHANGE_NULL_TO_READY:
-    // do the gst_gl search
+    // do the search for a display and application gl context
     if (!gst_gl_ensure_element_data (customgl, &customgl->display,
               &customgl->other_context))
         return GST_STATE_CHANGE_FAILURE;
-    // This needs to do more I think, like create the context or query upstream
-    _ensure_gl_context(customgl);
+    // Does the search for a gst gl context
+    // TODO: Where else should we call this from?
+    if (!_ensure_gl_context(customgl))
+      return GST_STATE_CHANGE_FAILURE;
     break;
   default:
     break;
@@ -213,11 +278,82 @@ static GstStateChangeReturn gst_customgl_change_state(GstElement *element, GstSt
   return ret;
 }
 
+static void _cuda_array_to_jpg(GstCustomgl *customgl, cudaArray_const_t src, int width, int height) {
+  cv::Mat outmat {cv::Size(width, height), CV_8UC4};
+  if (cudaMemcpy2DFromArray(outmat.data, outmat.step[0], src, 0, 0, width * 4, height, cudaMemcpyDeviceToHost) != cudaSuccess) {
+    GST_WARNING_OBJECT(customgl, "cuda memcpy failed");
+  }
+  cv::cvtColor(outmat, outmat, cv::COLOR_RGBA2BGR);
+  cv::imwrite("tmp.jpg", outmat);
+}
+
+static void _transform_image(GstGLContext *context, gpointer user_data) {
+  GstCustomgl *customgl = (GstCustomgl *)user_data;
+  cudaError_t error;
+
+  GST_DEBUG_OBJECT(customgl, "in gl thread with buffer %" GST_PTR_FORMAT " it has %d memory blocks", customgl->inbuffer,
+                   gst_buffer_n_memory(customgl->inbuffer));
+
+  GstGLMemory *memory = (GstGLMemory *)gst_buffer_peek_memory(customgl->inbuffer, 0);
+  g_return_if_fail(!gst_is_gl_buffer((GstMemory *)memory));
+
+  // TODO: add a texture target 2D assert
+  cudaGraphicsResource_t resource = NULL;
+  if (cudaGraphicsGLRegisterImage(
+          &resource, memory->tex_id,
+          gst_gl_texture_target_to_gl(memory->tex_target),
+          cudaGraphicsRegisterFlagsNone) != cudaSuccess) {
+    GST_WARNING_OBJECT(customgl, "failed to register gl image");
+  }
+  if (cudaGraphicsMapResources(1, &resource, cudaStreamDefault) != cudaSuccess) {
+    GST_WARNING_OBJECT(customgl, "failed to map resource for cuda");
+  }
+  /* void *dev_ptr; */
+  /* size_t size; */
+  /* error = cudaGraphicsResourceGetMappedPointer(&dev_ptr, &size, resource); */
+  /* cudaMipmappedArray_t mipmappedArray; */
+  /* error = cudaGraphicsResourceGetMappedMipmappedArray(&mipmappedArray, resource); */
+  cudaArray_t array;
+  error = cudaGraphicsSubResourceGetMappedArray(&array, resource, 0, 0);
+  switch (error) {
+  case cudaSuccess:
+    break;
+  case cudaErrorInvalidValue:
+    GST_WARNING_OBJECT(customgl, "invalid value");
+    break;
+  case cudaErrorInvalidResourceHandle:
+    GST_WARNING_OBJECT(customgl, "invalid resource handle");
+    break;
+  case cudaErrorUnknown:
+    GST_WARNING_OBJECT(customgl, "error unknown");
+    break;
+  default:
+    GST_WARNING_OBJECT(customgl, "some other error: %s %s", cudaGetErrorName(error), cudaGetErrorString(error));
+    break;
+  }
+
+  struct cudaChannelFormatDesc desc;
+  struct cudaExtent extent;
+  if (cudaArrayGetInfo(&desc, &extent, NULL, array) != cudaSuccess) {
+    GST_WARNING_OBJECT(customgl, "failed to get cuda array info");
+  }
+  GST_INFO_OBJECT(customgl, "channel format x: %d y: %d z: %d w: %d f: %d", desc.x, desc.y, desc.z, desc.w, desc.f);
+  GST_INFO_OBJECT(customgl, "array dimensions width: %ld height: %ld depth: %ld", extent.width, extent.height, extent.depth);
+  _cuda_array_to_jpg(customgl, array, extent.width, extent.height);
+
+  if (cudaGraphicsUnmapResources(1, &resource, cudaStreamDefault) != cudaSuccess) {
+    GST_WARNING_OBJECT(customgl, "failed to unmap graphics resources");
+  }
+}
+
 static GstFlowReturn gst_customgl_chain(GstPad *pad, GstObject *parent, GstBuffer *buffer) {
   GstCustomgl *customgl = GST_CUSTOMGL(parent);
-  gst_buffer_unref(buffer);
 
-  // call add_thread somewhere here
+  g_return_val_if_fail(customgl->context != NULL, GST_FLOW_ERROR);
+  customgl->inbuffer = buffer;
+  gst_gl_context_thread_add(customgl->context,
+                            (GstGLContextThreadFunc)_transform_image, (gpointer)customgl);
+  gst_buffer_unref(buffer);
 
   GstBuffer *outbuf = gst_buffer_new_allocate(NULL, 10, NULL);
   GstMapInfo outmapinfo;
@@ -234,20 +370,22 @@ static GstFlowReturn gst_customgl_chain(GstPad *pad, GstObject *parent, GstBuffe
 static gboolean gst_customgl_sink_event(GstPad *pad, GstObject *parent, GstEvent *event) {
   GstCustomgl *customgl = GST_CUSTOMGL(parent);
   gboolean ret;
+  GstCaps *outcaps;
+  GstCaps *caps;
+  GstEvent *newevent;
 
   GST_DEBUG_OBJECT(customgl, "received event on sinkpad %" GST_PTR_FORMAT, event);
 
   switch (GST_EVENT_TYPE(event)) {
   case GST_EVENT_CAPS:
-    GstCaps *caps;
     gst_event_parse_caps(event, &caps);
     if (!gst_video_info_from_caps(customgl->ininfo, caps)) {
       GST_WARNING_OBJECT(customgl, "failed to parse video info from caps");
     }
     gst_event_unref(event);
 
-    GstCaps *outcaps = gst_static_caps_get(&gst_customgl_src_template.static_caps);
-    GstEvent *newevent = gst_event_new_caps(outcaps);
+    outcaps = gst_static_caps_get(&gst_customgl_src_template.static_caps);
+    newevent = gst_event_new_caps(outcaps);
     GST_DEBUG_OBJECT(customgl, "pushing event %" GST_PTR_FORMAT, newevent);
     ret = gst_pad_push_event(customgl->srcpad, newevent);
     gst_caps_unref(outcaps);
@@ -287,18 +425,18 @@ static gboolean gst_customgl_sink_query(GstPad *pad, GstObject *parent, GstQuery
   GST_DEBUG_OBJECT(customgl, "received query on sinkpad %" GST_PTR_FORMAT, query);
 
   switch (GST_QUERY_TYPE(query)) {
-  case GST_QUERY_CONTEXT:
+  case GST_QUERY_CONTEXT:{
     GstGLDisplay *display = NULL;
     GstGLContext *context = NULL;
     GstGLContext *other_context = NULL;
 
     g_rec_mutex_lock(&customgl->mutex);
     if (customgl->display)
-      display = gst_object_ref(customgl->display);
+      display = static_cast<GstGLDisplay *>(gst_object_ref(customgl->display));
     if (customgl->context)
-      context = gst_object_ref(customgl->context);
+      context = static_cast<GstGLContext *>(gst_object_ref(customgl->context));
     if (customgl->other_context)
-      other_context = gst_object_ref(customgl->other_context);
+      other_context = static_cast<GstGLContext *>(gst_object_ref(customgl->other_context));
     g_rec_mutex_unlock(&customgl->mutex);
 
     ret = gst_gl_handle_context_query(GST_ELEMENT_CAST(customgl), query, display, context, other_context);
@@ -311,9 +449,11 @@ static gboolean gst_customgl_sink_query(GstPad *pad, GstObject *parent, GstQuery
       gst_object_unref(other_context);
 
     break;
-  default:
+  }
+  default:{
     ret = gst_pad_query_default(pad, parent, query);
     break;
+  }
   }
   return ret;
 }
